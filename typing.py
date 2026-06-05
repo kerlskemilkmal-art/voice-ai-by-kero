@@ -1,93 +1,78 @@
-from __future__ import annotations
+"""
+Typing support for Matplotlib
 
-import collections.abc as cabc
-import typing as t
+This module contains Type aliases which are useful for Matplotlib and potentially
+downstream libraries.
 
-if t.TYPE_CHECKING:  # pragma: no cover
-    from _typeshed.wsgi import WSGIApplication  # noqa: F401
-    from werkzeug.datastructures import Headers  # noqa: F401
-    from werkzeug.sansio.response import Response  # noqa: F401
+.. admonition:: Provisional status of typing
 
-# The possible types that are directly convertible or are a Response object.
-ResponseValue = t.Union[
-    "Response",
+    The ``typing`` module and type stub files are considered provisional and may change
+    at any time without a deprecation period.
+"""
+from collections.abc import Hashable, Sequence
+import pathlib
+from typing import Any, Callable, Literal, TypeAlias, TypeVar, Union
+
+from . import path
+from ._enums import JoinStyle, CapStyle
+from .artist import Artist
+from .backend_bases import RendererBase
+from .markers import MarkerStyle
+from .transforms import Bbox, Transform
+
+RGBColorType: TypeAlias = tuple[float, float, float] | str
+RGBAColorType: TypeAlias = (
+    str |  # "none" or "#RRGGBBAA"/"#RGBA" hex strings
+    tuple[float, float, float, float] |
+    # 2 tuple (color, alpha) representations, not infinitely recursive
+    # RGBColorType includes the (str, float) tuple, even for RGBA strings
+    tuple[RGBColorType, float] |
+    # (4-tuple, float) is odd, but accepted as the outer float overriding A of 4-tuple
+    tuple[tuple[float, float, float, float], float]
+)
+
+ColorType: TypeAlias = RGBColorType | RGBAColorType
+
+RGBColourType: TypeAlias = RGBColorType
+RGBAColourType: TypeAlias = RGBAColorType
+ColourType: TypeAlias = ColorType
+
+LineStyleType: TypeAlias = str | tuple[float, Sequence[float]]
+DrawStyleType: TypeAlias = Literal["default", "steps", "steps-pre", "steps-mid",
+                                   "steps-post"]
+MarkEveryType: TypeAlias = (
+    None |
+    int | tuple[int, int] | slice | list[int] |
+    float | tuple[float, float] |
+    list[bool]
+)
+
+MarkerType: TypeAlias = str | path.Path | MarkerStyle
+FillStyleType: TypeAlias = Literal["full", "left", "right", "bottom", "top", "none"]
+JoinStyleType: TypeAlias = JoinStyle | Literal["miter", "round", "bevel"]
+CapStyleType: TypeAlias = CapStyle | Literal["butt", "projecting", "round"]
+
+CoordsBaseType = Union[
     str,
-    bytes,
-    list[t.Any],
-    # Only dict is actually accepted, but Mapping allows for TypedDict.
-    t.Mapping[str, t.Any],
-    t.Iterator[str],
-    t.Iterator[bytes],
-    cabc.AsyncIterable[str],  # for Quart, until App is generic.
-    cabc.AsyncIterable[bytes],
+    Artist,
+    Transform,
+    Callable[
+        [RendererBase],
+        Union[Bbox, Transform]
+    ]
+]
+CoordsType = Union[
+    CoordsBaseType,
+    tuple[CoordsBaseType, CoordsBaseType]
 ]
 
-# the possible types for an individual HTTP header
-# This should be a Union, but mypy doesn't pass unless it's a TypeVar.
-HeaderValue = t.Union[str, list[str], tuple[str, ...]]
+RcStyleType: TypeAlias = (
+    str |
+    dict[str, Any] |
+    pathlib.Path |
+    Sequence[str | pathlib.Path | dict[str, Any]]
+)
 
-# the possible types for HTTP headers
-HeadersValue = t.Union[
-    "Headers",
-    t.Mapping[str, HeaderValue],
-    t.Sequence[tuple[str, HeaderValue]],
-]
-
-# The possible types returned by a route function.
-ResponseReturnValue = t.Union[
-    ResponseValue,
-    tuple[ResponseValue, HeadersValue],
-    tuple[ResponseValue, int],
-    tuple[ResponseValue, int, HeadersValue],
-    "WSGIApplication",
-]
-
-# Allow any subclass of werkzeug.Response, such as the one from Flask,
-# as a callback argument. Using werkzeug.Response directly makes a
-# callback annotated with flask.Response fail type checking.
-ResponseClass = t.TypeVar("ResponseClass", bound="Response")
-
-AppOrBlueprintKey = t.Optional[str]  # The App key is None, whereas blueprints are named
-AfterRequestCallable = t.Union[
-    t.Callable[[ResponseClass], ResponseClass],
-    t.Callable[[ResponseClass], t.Awaitable[ResponseClass]],
-]
-BeforeFirstRequestCallable = t.Union[
-    t.Callable[[], None], t.Callable[[], t.Awaitable[None]]
-]
-BeforeRequestCallable = t.Union[
-    t.Callable[[], t.Optional[ResponseReturnValue]],
-    t.Callable[[], t.Awaitable[t.Optional[ResponseReturnValue]]],
-]
-ShellContextProcessorCallable = t.Callable[[], dict[str, t.Any]]
-TeardownCallable = t.Union[
-    t.Callable[[t.Optional[BaseException]], None],
-    t.Callable[[t.Optional[BaseException]], t.Awaitable[None]],
-]
-TemplateContextProcessorCallable = t.Union[
-    t.Callable[[], dict[str, t.Any]],
-    t.Callable[[], t.Awaitable[dict[str, t.Any]]],
-]
-TemplateFilterCallable = t.Callable[..., t.Any]
-TemplateGlobalCallable = t.Callable[..., t.Any]
-TemplateTestCallable = t.Callable[..., bool]
-URLDefaultCallable = t.Callable[[str, dict[str, t.Any]], None]
-URLValuePreprocessorCallable = t.Callable[
-    [t.Optional[str], t.Optional[dict[str, t.Any]]], None
-]
-
-# This should take Exception, but that either breaks typing the argument
-# with a specific exception, or decorating multiple times with different
-# exceptions (and using a union type on the argument).
-# https://github.com/pallets/flask/issues/4095
-# https://github.com/pallets/flask/issues/4295
-# https://github.com/pallets/flask/issues/4297
-ErrorHandlerCallable = t.Union[
-    t.Callable[[t.Any], ResponseReturnValue],
-    t.Callable[[t.Any], t.Awaitable[ResponseReturnValue]],
-]
-
-RouteCallable = t.Union[
-    t.Callable[..., ResponseReturnValue],
-    t.Callable[..., t.Awaitable[ResponseReturnValue]],
-]
+_HT = TypeVar("_HT", bound=Hashable)
+HashableList: TypeAlias = list[_HT | "HashableList[_HT]"]
+"""A nested list of Hashable values."""
