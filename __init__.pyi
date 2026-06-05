@@ -1,124 +1,124 @@
-from .convert import (
-    frames_to_samples as frames_to_samples,
-    frames_to_time as frames_to_time,
-    samples_to_frames as samples_to_frames,
-    samples_to_time as samples_to_time,
-    time_to_samples as time_to_samples,
-    time_to_frames as time_to_frames,
-    blocks_to_samples as blocks_to_samples,
-    blocks_to_frames as blocks_to_frames,
-    blocks_to_time as blocks_to_time,
-    note_to_hz as note_to_hz,
-    note_to_midi as note_to_midi,
-    midi_to_hz as midi_to_hz,
-    midi_to_note as midi_to_note,
-    hz_to_note as hz_to_note,
-    hz_to_midi as hz_to_midi,
-    hz_to_mel as hz_to_mel,
-    hz_to_octs as hz_to_octs,
-    hz_to_fjs as hz_to_fjs,
-    mel_to_hz as mel_to_hz,
-    octs_to_hz as octs_to_hz,
-    A4_to_tuning as A4_to_tuning,
-    tuning_to_A4 as tuning_to_A4,
-    fft_frequencies as fft_frequencies,
-    cqt_frequencies as cqt_frequencies,
-    mel_frequencies as mel_frequencies,
-    tempo_frequencies as tempo_frequencies,
-    fourier_tempo_frequencies as fourier_tempo_frequencies,
-    A_weighting as A_weighting,
-    B_weighting as B_weighting,
-    C_weighting as C_weighting,
-    D_weighting as D_weighting,
-    Z_weighting as Z_weighting,
-    frequency_weighting as frequency_weighting,
-    multi_frequency_weighting as multi_frequency_weighting,
-    samples_like as samples_like,
-    times_like as times_like,
-    midi_to_svara_h as midi_to_svara_h,
-    midi_to_svara_c as midi_to_svara_c,
-    note_to_svara_h as note_to_svara_h,
-    note_to_svara_c as note_to_svara_c,
-    hz_to_svara_h as hz_to_svara_h,
-    hz_to_svara_c as hz_to_svara_c,
-)
+__all__ = [
+    "__bibtex__",
+    "__version__",
+    "__version_info__",
+    "set_loglevel",
+    "ExecutableNotFoundError",
+    "get_configdir",
+    "get_cachedir",
+    "get_data_path",
+    "matplotlib_fname",
+    "MatplotlibDeprecationWarning",
+    "RcParams",
+    "rc_params",
+    "rc_params_from_file",
+    "rcParamsDefault",
+    "rcParams",
+    "rcParamsOrig",
+    "defaultParams",
+    "rc",
+    "rcdefaults",
+    "rc_file_defaults",
+    "rc_file",
+    "rc_context",
+    "use",
+    "get_backend",
+    "interactive",
+    "is_interactive",
+    "colormaps",
+    "color_sequences",
+]
 
-from .audio import (
-    load as load,
-    stream as stream,
-    to_mono as to_mono,
-    resample as resample,
-    get_duration as get_duration,
-    get_samplerate as get_samplerate,
-    autocorrelate as autocorrelate,
-    lpc as lpc,
-    zero_crossings as zero_crossings,
-    clicks as clicks,
-    tone as tone,
-    chirp as chirp,
-    mu_compress as mu_compress,
-    mu_expand as mu_expand,
-)
+import os
+from pathlib import Path
 
-from .spectrum import (
-    stft as stft,
-    istft as istft,
-    magphase as magphase,
-    iirt as iirt,
-    reassigned_spectrogram as reassigned_spectrogram,
-    phase_vocoder as phase_vocoder,
-    perceptual_weighting as perceptual_weighting,
-    power_to_db as power_to_db,
-    db_to_power as db_to_power,
-    amplitude_to_db as amplitude_to_db,
-    db_to_amplitude as db_to_amplitude,
-    fmt as fmt,
-    pcen as pcen,
-    griffinlim as griffinlim,
-)
+from collections.abc import Callable, Generator
+import contextlib
+from packaging.version import Version
 
-from .pitch import (
-    estimate_tuning as estimate_tuning,
-    pitch_tuning as pitch_tuning,
-    piptrack as piptrack,
-    yin as yin,
-    pyin as pyin,
-)
+from matplotlib._api import MatplotlibDeprecationWarning
+from typing import Any, Literal, NamedTuple, overload
 
-from .constantq import (
-    cqt as cqt,
-    hybrid_cqt as hybrid_cqt,
-    pseudo_cqt as pseudo_cqt,
-    icqt as icqt,
-    griffinlim_cqt as griffinlim_cqt,
-    vqt as vqt,
-)
+class _VersionInfo(NamedTuple):
+    major: int
+    minor: int
+    micro: int
+    releaselevel: str
+    serial: int
 
-from .harmonic import (
-    salience as salience,
-    interp_harmonics as interp_harmonics,
-    f0_harmonics as f0_harmonics,
-)
+__bibtex__: str
+__version__: str
+__version_info__: _VersionInfo
 
-from .fft import (
-    get_fftlib as get_fftlib,
-    set_fftlib as set_fftlib,
-)
+def set_loglevel(level: str) -> None: ...
 
-from .notation import (
-    key_to_degrees as key_to_degrees,
-    key_to_notes as key_to_notes,
-    mela_to_degrees as mela_to_degrees,
-    mela_to_svara as mela_to_svara,
-    thaat_to_degrees as thaat_to_degrees,
-    list_mela as list_mela,
-    list_thaat as list_thaat,
-    fifths_to_note as fifths_to_note,
-    interval_to_fjs as interval_to_fjs,
-)
+class _ExecInfo(NamedTuple):
+    executable: str
+    raw_version: str
+    version: Version
 
-from .intervals import (
-    interval_frequencies as interval_frequencies,
-    pythagorean_intervals as pythagorean_intervals,
-    plimit_intervals as plimit_intervals,
-)
+class ExecutableNotFoundError(FileNotFoundError): ...
+
+def _get_executable_info(name: str) -> _ExecInfo: ...
+def get_configdir() -> str: ...
+def get_cachedir() -> str: ...
+def get_data_path() -> str: ...
+def matplotlib_fname() -> str: ...
+
+class RcParams(dict[str, Any]):
+    validate: dict[str, Callable]
+    def __init__(self, *args, **kwargs) -> None: ...
+    def _set(self, key: str, val: Any) -> None: ...
+    def _get(self, key: str) -> Any: ...
+
+    def _update_raw(self, other_params: dict | RcParams) -> None: ...
+
+    def _ensure_has_backend(self) -> None: ...
+    def __setitem__(self, key: str, val: Any) -> None: ...
+    def __getitem__(self, key: str) -> Any: ...
+    def __iter__(self) -> Generator[str, None, None]: ...
+    def __len__(self) -> int: ...
+    def find_all(self, pattern: str) -> RcParams: ...
+    def copy(self) -> RcParams: ...
+
+def rc_params(fail_on_error: bool = ...) -> RcParams: ...
+def rc_params_from_file(
+    fname: str | Path | os.PathLike,
+    fail_on_error: bool = ...,
+    use_default_template: bool = ...,
+) -> RcParams: ...
+
+rcParamsDefault: RcParams
+rcParams: RcParams
+rcParamsOrig: RcParams
+defaultParams: dict[str, Any]
+
+def rc(group: str, **kwargs) -> None: ...
+def rcdefaults() -> None: ...
+def rc_file_defaults() -> None: ...
+def rc_file(
+    fname: str | Path | os.PathLike, *, use_default_template: bool = ...
+) -> None: ...
+@contextlib.contextmanager
+def rc_context(
+    rc: dict[str, Any] | None = ..., fname: str | Path | os.PathLike | None = ...
+) -> Generator[None, None, None]: ...
+def use(backend: str, *, force: bool = ...) -> None: ...
+@overload
+def get_backend(*, auto_select: Literal[True] = True) -> str: ...
+@overload
+def get_backend(*, auto_select: Literal[False]) -> str | None: ...
+def interactive(b: bool) -> None: ...
+def is_interactive() -> bool: ...
+
+def _preprocess_data(
+    func: Callable | None = ...,
+    *,
+    replace_names: list[str] | None = ...,
+    label_namer: str | None = ...
+) -> Callable: ...
+
+from matplotlib.cm import _colormaps as colormaps  # noqa: E402
+from matplotlib.cm import _multivar_colormaps as multivar_colormaps  # noqa: E402
+from matplotlib.cm import _bivar_colormaps as bivar_colormaps  # noqa: E402
+from matplotlib.colors import _color_sequences as color_sequences  # noqa: E402
