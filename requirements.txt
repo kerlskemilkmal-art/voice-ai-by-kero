@@ -1,0 +1,7 @@
+Flask
+requests
+librosa
+noisereduce
+soundfile
+numpy
+python-dotenv

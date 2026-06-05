@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ai voice bu kero - Modern AI Voice Platform</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        darkblue: {
+                            900: '#070a13',
+                            950: '#03050a',
+                        },
+                        violet: {
+                            500: '#8b5cf6',
+                            600: '#7c3aed',
+                        },
+                        cyan: {
+                            400: '#22d3ee',
+                            500: '#06b6d4',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Outfit', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Custom CSS for custom animations and scrollbars -->
+    <link rel="stylesheet" href="/css/style.css">
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="bg-darkblue-950 text-gray-100 min-h-screen relative overflow-x-hidden font-sans">
+    
+    <!-- Animated Radial Backgrounds -->
+    <div class="radial-bg"></div>
+
+    <!-- Header / Nav -->
+    <header class="sticky top-0 z-40 w-full glass-panel border-b border-white/5 bg-darkblue-950/60 backdrop-blur-md px-6 py-4">
+        <div class="max-w-7xl mx-auto flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="bg-gradient-to-tr from-cyan-400 to-violet-500 p-2 rounded-xl shadow-lg shadow-violet-500/20">
+                    <i data-lucide="mic" class="h-6 w-6 text-white animate-pulse"></i>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-cyan-400 via-indigo-300 to-violet-500 bg-clip-text text-transparent">
+                        Ai voice bu kero
+                    </h1>
+                    <p class="text-[10px] text-cyan-400 font-medium tracking-widest uppercase">Next-Gen Audio Suite</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center space-x-4">
+                <button id="open-settings-btn" class="flex items-center space-x-2 px-4 py-2 rounded-xl glass-panel hover:bg-white/10 transition duration-300 text-sm border border-white/10 hover:border-violet-500/40">
+                    <i data-lucide="settings" class="h-4 w-4 text-violet-400"></i>
+                    <span>API Keys</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-6 py-10 relative z-10">
+        
+        <!-- Hero Section with AI-Generated soundwave photo -->
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-8 items-center mb-12 glass-panel p-8 relative overflow-hidden border border-white/10 shadow-2xl">
+            <!-- Background glow inside hero -->
+            <div class="absolute -right-10 -top-10 w-40 h-40 bg-violet-600/10 rounded-full blur-2xl"></div>
+            <div class="absolute -left-10 -bottom-10 w-40 h-40 bg-cyan-500/10 rounded-full blur-2xl"></div>
+            
+            <div class="md:col-span-7 space-y-6">
+                <div class="flex flex-wrap gap-3">
+                    <div id="demo-badge" class="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-semibold">
+                        <span class="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+                        <span>Demo Mode (Using local fallbacks)</span>
+                    </div>
+                    <div class="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-semibold">
+                        <i data-lucide="activity" class="h-3.5 w-3.5 text-cyan-400"></i>
+                        <span>System Online & Calibrated</span>
+                    </div>
+                </div>
+                
+                <h2 class="text-3xl md:text-5xl font-black tracking-tight text-white leading-tight">
+                    Next-Gen Neural <br><span class="bg-gradient-to-r from-cyan-400 to-violet-500 bg-clip-text text-transparent">Voice Intelligence</span>
+                </h2>
+                <p class="text-gray-300 text-sm md:text-base leading-relaxed max-w-xl">
+                    Welcome to <span class="text-cyan-400 font-semibold">Ai voice bu kero</span>. Upload voice samples to clone models, shift characteristics in real-time, and polish noisy tracks to studio-grade purity.
+                </p>
+                
+                <div class="flex flex-wrap gap-4 pt-2">
+                    <div class="flex items-center space-x-2 text-xs text-gray-400">
+                        <i data-lucide="check-circle-2" class="h-4 w-4 text-emerald-400"></i>
+                        <span>Noisereduce v3.0</span>
+                    </div>
+                    <div class="flex items-center space-x-2 text-xs text-gray-400">
+                        <i data-lucide="check-circle-2" class="h-4 w-4 text-emerald-400"></i>
+                        <span>Librosa Effects</span>
+                    </div>
+                    <div class="flex items-center space-x-2 text-xs text-gray-400">
+                        <i data-lucide="check-circle-2" class="h-4 w-4 text-emerald-400"></i>
+                        <span>Neural TTS Models</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="md:col-span-5 flex justify-center relative">
+                <!-- Glowing ambient background behind image -->
+                <div id="hero-img-glow" class="absolute inset-0 bg-gradient-to-tr from-cyan-500 to-violet-600 rounded-2xl opacity-15 blur-xl transition duration-500"></div>
+                <!-- Interactive Sound Responsive Image Card -->
+                <div id="hero-img-card" class="relative glass-panel p-2 border border-white/10 rounded-2xl shadow-xl overflow-hidden hover:scale-[1.02] transition duration-500 max-w-sm animate-float">
+                    <img id="hero-ai-photo" src="/images/ai_voice_hero.png" alt="AI Voice Core" class="rounded-xl w-full object-cover shadow-inner transition duration-500">
+                    <div class="absolute bottom-4 left-4 right-4 bg-black/60 backdrop-blur-md border border-white/5 p-3 rounded-xl flex items-center justify-between">
+                        <div>
+                            <span class="text-[10px] text-cyan-400 font-bold uppercase tracking-wider block">Neural Engine Status</span>
+                            <span id="hero-status-text" class="text-xs text-white font-medium">Idle / Monitoring Audio</span>
+                        </div>
+                        <div class="flex items-center space-x-1" id="hero-visualizer-dots">
+                            <span class="relative flex h-2 w-2">
+                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dashboard Grid (4 Main Sections) -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            
+            <!-- SECTION 1: TEXT TO SPEECH (TTS) -->
+            <section class="glass-panel p-6 border border-white/5 hover:border-cyan-500/20 transition duration-500 flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between mb-6">
+                        <div class="flex items-center space-x-3">
+                            <div class="p-2.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
+                                <i data-lucide="message-square-text" class="h-5 w-5 text-cyan-400"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-lg font-bold text-white">Text-to-Speech (TTS)</h3>
+                                <p class="text-xs text-gray-400">Convert text to natural human speech</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Input Text -->
+                    <div class="mb-4">
+                        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Input Text</label>
+                        <textarea id="tts-text" rows="4" class="w-full bg-black/30 border border-white/10 rounded-xl p-3 text-sm focus:outline-none focus:border-cyan-400 transition placeholder:text-gray-600 resize-none text-white" placeholder="Enter text to synthesize into high-fidelity AI speech..."></textarea>
+                    </div>
+
+                    <!-- Voice Dropdown & Options -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Select AI Voice</label>
+                            <div class="relative">
+                                <select id="tts-voice" class="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm focus:outline-none focus:border-cyan-400 transition appearance-none cursor-pointer text-white">
+                                    <option value="" disabled selected>Loading voices...</option>
+                                </select>
+                                <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500">
+                                    <i data-lucide="chevron-down" class="h-4 w-4"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Speed / Expression</label>
+                            <div class="flex items-center h-[46px] px-3 bg-black/20 border border-white/5 rounded-xl text-xs text-gray-400">
+                                <i data-lucide="info" class="h-4 w-4 text-cyan-400 mr-2 flex-shrink-0"></i>
+                                <span>Configured automatically by neural model</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Button & Output Audio -->
+                <div class="border-t border-white/5 pt-6 mt-4">
+                    <button id="tts-btn" class="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-cyan-500/10 hover:shadow-cyan-400/20 transition duration-300 flex items-center justify-center space-x-2">
+                        <i data-lucide="play" class="h-4 w-4 fill-current"></i>
+                        <span>Generate Audio</span>
+                    </button>
+
+                    <!-- Player Wrapper (Hidden initially) -->
+                    <div id="tts-player-wrapper" class="hidden mt-6 bg-black/20 rounded-xl p-4 border border-white/5 animate-fadeIn">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-xs font-semibold text-cyan-400">Generated Voice Output</span>
+                            <button id="tts-download" class="text-gray-400 hover:text-white transition">
+                                <i data-lucide="download" class="h-4 w-4"></i>
+                            </button>
+                        </div>
+                        <audio id="tts-audio" class="w-full hidden" controls></audio>
+                        <!-- Custom Sleek Audio Player -->
+                        <div class="flex items-center space-x-3">
+                            <button id="tts-play-pause-btn" class="w-10 h-10 rounded-full bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/30 flex items-center justify-center text-cyan-400 transition">
+                                <i data-lucide="play" class="h-5 w-5 fill-current"></i>
+                            </button>
+                            <div class="flex-grow">
+                                <div id="tts-progress-bg" class="w-full h-1.5 bg-white/10 rounded-full cursor-pointer relative">
+                                    <div id="tts-progress-bar" class="h-full bg-cyan-400 rounded-full w-0"></div>
+                                </div>
+                                <div class="flex justify-between text-[10px] text-gray-500 mt-1">
+                                    <span id="tts-current-time">0:00</span>
+                                    <span id="tts-duration">0:00</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 2: VOICE CLONING -->
+            <section class="glass-panel p-6 border border-white/5 hover:border-violet-500/20 transition duration-500 flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between mb-6">
+                        <div class="flex items-center space-x-3">
+                            <div class="p-2.5 rounded-lg bg-violet-500/10 border border-violet-500/20">
+                                <i data-lucide="fingerprint" class="h-5 w-5 text-violet-400"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-lg font-bold text-white">Voice Cloning</h3>
+                                <p class="text-xs text-gray-400">Clone a voice from a 10s audio sample</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Voice Name -->
+                    <div class="mb-4">
+                        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Voice Name</label>
+                        <input id="clone-name" type="text" class="w-full bg-black/30 border border-white/10 rounded-xl p-3 text-sm focus:outline-none focus:border-violet-400 transition placeholder:text-gray-600 text-white" placeholder="E.g., My Cloned Voice">
+                    </div>
+
+                    <!-- Drag & Drop File Upload -->
+                    <div class="mb-6">
+                        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">10-Second Audio Sample</label>
+                        <div id="clone-dropzone" class="border-2 border-dashed border-white/10 hover:border-violet-500/40 rounded-xl p-6 text-center cursor-pointer transition bg-black/20 hover:bg-black/35 group">
+                            <input id="clone-file" type="file" accept="audio/*" class="hidden">
+                            <div class="flex flex-col items-center space-y-2">
+                                <div class="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center text-gray-400 group-hover:text-violet-400 transition">
+                                    <i data-lucide="upload-cloud" class="h-5 w-5"></i>
+                                </div>
+                                <p class="text-sm font-medium text-gray-300" id="clone-file-name">Drag & drop or click to upload</p>
+                                <p class="text-[11px] text-gray-500">WAV, MP3 or M4A (Max 10s sample size)</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Button & List of Clones -->
+                <div class="border-t border-white/5 pt-6">
+                    <button id="clone-btn" class="w-full bg-gradient-to-r from-violet-600 to-indigo-700 hover:from-violet-500 hover:to-indigo-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-violet-500/10 hover:shadow-violet-400/20 transition duration-300 flex items-center justify-center space-x-2">
+                        <i data-lucide="sparkles" class="h-4 w-4"></i>
+                        <span>Generate Cloned Voice</span>
+                    </button>
+
+                    <!-- Saved Clones (Scrollable area) -->
+                    <div class="mt-4">
+                        <label class="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2">Cloned Voices Archive</label>
+                        <div id="cloned-voices-list" class="max-h-[110px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                            <!-- Populated by JS -->
+                            <p class="text-xs text-gray-600 italic">No cloned voices saved yet.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 3: VOICE CHANGER -->
+            <section class="glass-panel p-6 border border-white/5 hover:border-indigo-500/20 transition duration-500 flex flex-col justify-between lg:col-span-1">
+                <div>
+                    <div class="flex items-center justify-between mb-6">
+                        <div class="flex items-center space-x-3">
+                            <div class="p-2.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20">
+                                <i data-lucide="shuffle" class="h-5 w-5 text-indigo-400"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-lg font-bold text-white">Voice Changer</h3>
+                                <p class="text-xs text-gray-400">Modify pitch, speed, and character tone</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- File Upload -->
+                    <div class="mb-4">
+                        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Source Audio File</label>
+                        <div id="changer-dropzone" class="border-2 border-dashed border-white/10 hover:border-indigo-500/40 rounded-xl p-4 text-center cursor-pointer transition bg-black/20 hover:bg-black/35 group">
+                            <input id="changer-file" type="file" accept="audio/*" class="hidden">
+                            <div class="flex items-center justify-center space-x-3">
+                                <div class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-gray-400 group-hover:text-indigo-400 transition">
+                                    <i data-lucide="music" class="h-4 w-4"></i>
+                                </div>
+                                <span class="text-xs font-medium text-gray-300" id="changer-file-name">Upload audio to change voice</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sliders & Preset Dropdown -->
+                    <div class="space-y-4 mb-6">
+                        <!-- Pitch Slider -->
+                        <div>
+                            <div class="flex items-center justify-between mb-2">
+                                <label class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Pitch Shift</label>
+                                <span id="pitch-val" class="text-xs text-indigo-400 font-bold font-mono">0 semitones</span>
+                            </div>
+                            <input id="changer-pitch" type="range" min="-12" max="12" value="0" class="w-full">
+                        </div>
+
+                        <!-- Speed Slider -->
+                        <div>
+                            <div class="flex items-center justify-between mb-2">
+                                <label class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Speed Rate</label>
+                                <span id="speed-val" class="text-xs text-indigo-400 font-bold font-mono">1.0x</span>
+                            </div>
+                            <input id="changer-speed" type="range" min="0.5" max="2.0" step="0.1" value="1.0" class="w-full">
+                        </div>
+
+                        <!-- Tone Presets -->
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Tone Character Preset</label>
+                            <div class="relative">
+                                <select id="changer-tone" class="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm focus:outline-none focus:border-indigo-400 transition appearance-none cursor-pointer text-white">
+                                    <option value="">No Filter (Default)</option>
+                                    <option value="robot">Robot Modulator</option>
+                                    <option value="radio">AM Radio Saturation</option>
+                                    <option value="bass">Warm Bass Boost</option>
+                                    <option value="treble">Crisp Treble Boost</option>
+                                    <option value="helium">Helium Vocal Shift</option>
+                                    <option value="giant">Giant Deep Vocal</option>
+                                </select>
+                                <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500">
+                                    <i data-lucide="chevron-down" class="h-4 w-4"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Process Button & Before/After Players -->
+                <div class="border-t border-white/5 pt-6 mt-4">
+                    <button id="changer-btn" class="w-full bg-gradient-to-r from-indigo-600 to-violet-700 hover:from-indigo-500 hover:to-violet-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-indigo-500/10 hover:shadow-indigo-400/20 transition duration-300 flex items-center justify-center space-x-2">
+                        <i data-lucide="repeat-2" class="h-4 w-4"></i>
+                        <span>Apply Transformations</span>
+                    </button>
+
+                    <!-- Outputs with Before/After Toggle -->
+                    <div id="changer-player-wrapper" class="hidden mt-6 bg-black/20 rounded-xl p-4 border border-white/5 animate-fadeIn">
+                        <div class="flex items-center justify-between mb-4">
+                            <!-- Toggle switch for Before/After -->
+                            <div class="flex items-center space-x-2">
+                                <span class="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Preview:</span>
+                                <div class="inline-flex rounded-lg p-0.5 bg-black/50 border border-white/15">
+                                    <button id="changer-toggle-original" class="px-2.5 py-1 text-[10px] font-bold rounded-md transition duration-200 bg-white/10 text-white">Before</button>
+                                    <button id="changer-toggle-processed" class="px-2.5 py-1 text-[10px] font-bold rounded-md transition duration-200 text-gray-400 hover:text-white">After</button>
+                                </div>
+                            </div>
+                            <!-- Download Button -->
+                            <button id="changer-download" class="text-gray-400 hover:text-white transition">
+                                <i data-lucide="download" class="h-4 w-4"></i>
+                            </button>
+                        </div>
+
+                        <!-- Audio and Custom Visualizer -->
+                        <div class="flex items-center space-x-3">
+                            <button id="changer-play-btn" class="w-10 h-10 rounded-full bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-500/30 flex items-center justify-center text-indigo-400 transition">
+                                <i data-lucide="play" class="h-5 w-5 fill-current"></i>
+                            </button>
+                            <div class="flex-grow">
+                                <div id="changer-progress-bg" class="w-full h-1.5 bg-white/10 rounded-full cursor-pointer relative">
+                                    <div id="changer-progress-bar" class="h-full bg-indigo-400 rounded-full w-0"></div>
+                                </div>
+                                <div class="flex justify-between text-[10px] text-gray-500 mt-1">
+                                    <span id="changer-current-time">0:00</span>
+                                    <span id="changer-duration">0:00</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Visual Wave simulator -->
+                        <div class="flex justify-center items-end space-x-1.5 h-6 mt-4 opacity-50" id="changer-visualizer">
+                            <span class="w-[3px] bg-indigo-400 h-1.5 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-indigo-400 h-1 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-indigo-400 h-2.5 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-indigo-400 h-1 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-indigo-400 h-3 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-indigo-400 h-2 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-indigo-400 h-4 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-indigo-400 h-2 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-indigo-400 h-3.5 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-indigo-400 h-1 rounded-full visualizer-bar"></span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SECTION 4: AI AUDIO ENHANCER -->
+            <section class="glass-panel p-6 border border-white/5 hover:border-emerald-500/20 transition duration-500 flex flex-col justify-between lg:col-span-1">
+                <div>
+                    <div class="flex items-center justify-between mb-6">
+                        <div class="flex items-center space-x-3">
+                            <div class="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                                <i data-lucide="wand-2" class="h-5 w-5 text-emerald-400"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-lg font-bold text-white">AI Audio Enhancer</h3>
+                                <p class="text-xs text-gray-400">Studio noise reduction and leveling</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- File Upload -->
+                    <div class="mb-4">
+                        <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Noisy Audio File</label>
+                        <div id="enhancer-dropzone" class="border-2 border-dashed border-white/10 hover:border-emerald-500/40 rounded-xl p-4 text-center cursor-pointer transition bg-black/20 hover:bg-black/35 group">
+                            <input id="enhancer-file" type="file" accept="audio/*" class="hidden">
+                            <div class="flex items-center justify-center space-x-3">
+                                <div class="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-gray-400 group-hover:text-emerald-400 transition">
+                                    <i data-lucide="volume-x" class="h-4 w-4"></i>
+                                </div>
+                                <span class="text-xs font-medium text-gray-300" id="enhancer-file-name">Upload noisy audio file</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Enhancement checklist/switches -->
+                    <div class="bg-black/20 rounded-xl p-4 border border-white/5 space-y-4 mb-6">
+                        <!-- Switch (Noise reduction is permanently active inside the toggle) -->
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-2 h-2 rounded-full bg-emerald-400"></div>
+                                <span class="text-xs font-semibold text-gray-300">Intelligent Noise Gate</span>
+                            </div>
+                            <span class="text-[10px] text-emerald-400 font-bold uppercase">Standard Active</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-2 h-2 rounded-full bg-emerald-400"></div>
+                                <span class="text-xs font-semibold text-gray-300">Echo Cancellation</span>
+                            </div>
+                            <span class="text-[10px] text-emerald-400 font-bold uppercase">Standard Active</span>
+                        </div>
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-2 h-2 rounded-full bg-emerald-400"></div>
+                                <span class="text-xs font-semibold text-gray-300">Studio Volume Normalization</span>
+                            </div>
+                            <span class="text-[10px] text-emerald-400 font-bold uppercase">Standard Active</span>
+                        </div>
+
+                        <!-- One Click Toggle -->
+                        <div class="border-t border-white/5 pt-4 flex items-center justify-between">
+                            <div>
+                                <span class="text-sm font-bold text-white block">Master Enhancement Toggle</span>
+                                <span class="text-[10px] text-gray-400">Activate all features at once</span>
+                            </div>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" id="enhancer-master-toggle" class="sr-only peer" checked>
+                                <div class="w-11 h-6 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-gray-400 peer-checked:after:bg-emerald-400 after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500/20 border border-white/10 peer-checked:border-emerald-500/50"></div>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Process Button & Before/After Players -->
+                <div class="border-t border-white/5 pt-6 mt-4">
+                    <button id="enhancer-btn" class="w-full bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-emerald-500/10 hover:shadow-emerald-400/20 transition duration-300 flex items-center justify-center space-x-2">
+                        <i data-lucide="sparkles" class="h-4 w-4"></i>
+                        <span>Process & Enhance</span>
+                    </button>
+
+                    <!-- Outputs with Before/After Toggle -->
+                    <div id="enhancer-player-wrapper" class="hidden mt-6 bg-black/20 rounded-xl p-4 border border-white/5 animate-fadeIn">
+                        <div class="flex items-center justify-between mb-4">
+                            <!-- Toggle switch for Before/After -->
+                            <div class="flex items-center space-x-2">
+                                <span class="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Preview:</span>
+                                <div class="inline-flex rounded-lg p-0.5 bg-black/50 border border-white/15">
+                                    <button id="enhancer-toggle-original" class="px-2.5 py-1 text-[10px] font-bold rounded-md transition duration-200 bg-white/10 text-white">Before</button>
+                                    <button id="enhancer-toggle-processed" class="px-2.5 py-1 text-[10px] font-bold rounded-md transition duration-200 text-gray-400 hover:text-white">After</button>
+                                </div>
+                            </div>
+                            <!-- Download Button -->
+                            <button id="enhancer-download" class="text-gray-400 hover:text-white transition">
+                                <i data-lucide="download" class="h-4 w-4"></i>
+                            </button>
+                        </div>
+
+                        <!-- Audio and Custom Visualizer -->
+                        <div class="flex items-center space-x-3">
+                            <button id="enhancer-play-btn" class="w-10 h-10 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 flex items-center justify-center text-emerald-400 transition">
+                                <i data-lucide="play" class="h-5 w-5 fill-current"></i>
+                            </button>
+                            <div class="flex-grow">
+                                <div id="enhancer-progress-bg" class="w-full h-1.5 bg-white/10 rounded-full cursor-pointer relative">
+                                    <div id="enhancer-progress-bar" class="h-full bg-emerald-400 rounded-full w-0"></div>
+                                </div>
+                                <div class="flex justify-between text-[10px] text-gray-500 mt-1">
+                                    <span id="enhancer-current-time">0:00</span>
+                                    <span id="enhancer-duration">0:00</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Visual Wave simulator -->
+                        <div class="flex justify-center items-end space-x-1.5 h-6 mt-4 opacity-50" id="enhancer-visualizer">
+                            <span class="w-[3px] bg-emerald-400 h-2.5 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-emerald-400 h-1 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-emerald-400 h-3 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-emerald-400 h-2 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-emerald-400 h-4 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-emerald-400 h-1.5 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-emerald-400 h-3.5 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-emerald-400 h-2 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-emerald-400 h-1 rounded-full visualizer-bar"></span>
+                            <span class="w-[3px] bg-emerald-400 h-3 rounded-full visualizer-bar"></span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="max-w-7xl mx-auto px-6 py-8 text-center text-xs text-gray-500 border-t border-white/5 relative z-10">
+        <p>© 2026 Ai voice bu kero. All rights reserved. Created with Glassmorphism Design Aesthetics.</p>
+    </footer>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm hidden animate-fadeIn">
+        <div class="glass-panel w-full max-w-md p-6 border border-white/10 shadow-2xl relative">
+            <button id="close-settings-btn" class="absolute top-4 right-4 text-gray-400 hover:text-white transition">
+                <i data-lucide="x" class="h-5 w-5"></i>
+            </button>
+            
+            <div class="flex items-center space-x-2.5 mb-6">
+                <i data-lucide="key-round" class="h-5 w-5 text-violet-400"></i>
+                <h3 class="text-lg font-bold text-white">API Key Configuration</h3>
+            </div>
+            
+            <p class="text-xs text-gray-400 mb-6">
+                Enter your credentials below to bypass Demo mode. Keys are securely sent in request headers to the API providers and not stored permanently on this server.
+            </p>
+            
+            <div class="space-y-4 mb-6">
+                <div>
+                    <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">ElevenLabs API Key</label>
+                    <input id="settings-elevenlabs-key" type="password" class="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm focus:outline-none focus:border-violet-400 transition text-white placeholder:text-gray-700" placeholder="xi-api-key...">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">OpenAI API Key</label>
+                    <input id="settings-openai-key" type="password" class="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-sm focus:outline-none focus:border-violet-400 transition text-white placeholder:text-gray-700" placeholder="sk-...">
+                </div>
+            </div>
+            
+            <button id="save-settings-btn" class="w-full bg-violet-600 hover:bg-violet-500 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition duration-200">
+                Save & Apply Keys
+            </button>
+        </div>
+    </div>
+
+    <!-- Core App JS -->
+    <script src="/js/app.js"></script>
+</body>
+</html>
