@@ -1,120 +1,80 @@
-# Adapted from https://stackoverflow.com/a/9558001/2536294
-
-import ast
-import functools
-import operator as op
-from dataclasses import dataclass
-
-from ._multiprocessing_helpers import mp
-
-if mp is not None:
-    from .externals.loky.process_executor import _ExceptionWithTraceback
+from collections import defaultdict
 
 
-# supported operators
-operators = {
-    ast.Add: op.add,
-    ast.Sub: op.sub,
-    ast.Mult: op.mul,
-    ast.Div: op.truediv,
-    ast.FloorDiv: op.floordiv,
-    ast.Mod: op.mod,
-    ast.Pow: op.pow,
-    ast.USub: op.neg,
-}
+class DuplicatedNameError(NameError):
+    pass
 
 
-def eval_expr(expr):
-    """Somewhat safely evaluate an arithmetic expression.
+class NameScope(object):
+    def __init__(self):
+        self._useset = set([''])
+        self._basenamemap = defaultdict(int)
 
-    >>> eval_expr('2*6')
-    12
-    >>> eval_expr('2**6')
-    64
-    >>> eval_expr('1 + 2*3**(4) / (6 + -7)')
-    -161.0
+    def is_used(self, name):
+        return name in self._useset
 
-    Raises ValueError if the expression is invalid, too long
-    or its computation involves too large values.
-    """
-    # Restrict the length of the expression to avoid potential Python crashes
-    # as per the documentation of ast.parse.
-    max_length = 30
-    if len(expr) > max_length:
-        raise ValueError(
-            f"Expression {expr[:max_length]!r}... is too long. "
-            f"Max length is {max_length}, got {len(expr)}."
-        )
-    try:
-        return eval_(ast.parse(expr, mode="eval").body)
-    except (TypeError, SyntaxError, OverflowError, KeyError) as e:
-        raise ValueError(
-            f"{expr!r} is not a valid or supported arithmetic expression."
-        ) from e
+    def register(self, name, deduplicate=False):
+        if deduplicate:
+            name = self.deduplicate(name)
+        elif self.is_used(name):
+            raise DuplicatedNameError(name)
+        self._useset.add(name)
+        return name
 
+    def deduplicate(self, name):
+        basename = name
+        while self.is_used(name):
+            ident = self._basenamemap[basename] + 1
+            self._basenamemap[basename] = ident
+            name = "{0}.{1}".format(basename, ident)
+        return name
 
-def limit(max_=None):
-    """Return decorator that limits allowed returned values."""
-
-    def decorator(func):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            ret = func(*args, **kwargs)
-            try:
-                mag = abs(ret)
-            except TypeError:
-                pass  # not applicable
-            else:
-                if mag > max_:
-                    raise ValueError(
-                        f"Numeric literal {ret} is too large, max is {max_}."
-                    )
-            return ret
-
-        return wrapper
-
-    return decorator
+    def get_child(self):
+        return type(self)(parent=self)
 
 
-@limit(max_=10**6)
-def eval_(node):
-    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
-        return node.value
-    elif isinstance(node, ast.BinOp):  # <left> <operator> <right>
-        return operators[type(node.op)](eval_(node.left), eval_(node.right))
-    elif isinstance(node, ast.UnaryOp):  # <operator> <operand> e.g., -1
-        return operators[type(node.op)](eval_(node.operand))
-    else:
-        raise TypeError(node)
+class _StrCaching(object):
 
-
-@dataclass(frozen=True)
-class _Sentinel:
-    """A sentinel to mark a parameter as not explicitly set"""
-
-    default_value: object
-
-    def __repr__(self):
-        return f"default({self.default_value!r})"
-
-
-class _TracebackCapturingWrapper:
-    """Protect function call and return error with traceback."""
-
-    def __init__(self, func):
-        self.func = func
-
-    def __call__(self, **kwargs):
+    def _clear_string_cache(self):
         try:
-            return self.func(**kwargs)
-        except BaseException as e:
-            return _ExceptionWithTraceback(e)
+            del self.__cached_str
+        except AttributeError:
+            pass
+
+    def __str__(self):
+        try:
+            return self.__cached_str
+        except AttributeError:
+            s = self.__cached_str = self._to_string()
+            return s
 
 
-def _retrieve_traceback_capturing_wrapped_call(out):
-    if isinstance(out, _ExceptionWithTraceback):
-        rebuild, args = out.__reduce__()
-        out = rebuild(*args)
-    if isinstance(out, BaseException):
-        raise out
-    return out
+class _StringReferenceCaching(object):
+
+    def get_reference(self):
+        try:
+            return self.__cached_refstr
+        except AttributeError:
+            s = self.__cached_refstr = self._get_reference()
+            return s
+
+
+class _HasMetadata(object):
+
+    def set_metadata(self, name, node):
+        """
+        Attach unnamed metadata *node* to the metadata slot *name* of this
+        value.
+        """
+        self.metadata[name] = node
+
+    def _stringify_metadata(self, leading_comma=False):
+        if self.metadata:
+            buf = []
+            if leading_comma:
+                buf.append("")
+            buf += ["!{0} {1}".format(k, v.get_reference())
+                    for k, v in self.metadata.items()]
+            return ', '.join(buf)
+        else:
+            return ''

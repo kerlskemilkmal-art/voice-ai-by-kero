@@ -1,6 +1,3 @@
-import sys
+from llvmlite.tests import main
 
-from .cli import main
-
-if __name__ == "__main__":
-    sys.exit(main())
+main()

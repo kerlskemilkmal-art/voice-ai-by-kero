@@ -1,179 +1,280 @@
-Metadata-Version: 2.4
-Name: lazy-loader
-Version: 0.5
-Summary: Makes it easy to load subpackages and functions on demand.
-Author: Scientific Python Developers
-License-Expression: BSD-3-Clause
-Project-URL: Home, https://scientific-python.org/specs/spec-0001/
-Project-URL: Source, https://github.com/scientific-python/lazy-loader
-Classifier: Development Status :: 5 - Production/Stable
+Metadata-Version: 2.2
+Name: librosa
+Version: 0.11.0
+Summary: Python module for audio and music processing
+Home-page: https://librosa.org
+Author: Brian McFee, librosa development team
+Author-email: brian.mcfee@nyu.edu
+License: ISC
+Project-URL: Documentation, https://librosa.org/doc
+Project-URL: Download, https://github.com/librosa/librosa/releases
+Project-URL: Source, https://github.com/librosa/librosa
+Project-URL: Tracker, https://github.com/librosa/librosa/issues
+Project-URL: Discussion forum, https://groups.google.com/g/librosa
+Classifier: License :: OSI Approved :: ISC License (ISCL)
+Classifier: Programming Language :: Python
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: Topic :: Multimedia :: Sound/Audio :: Analysis
+Classifier: Framework :: Matplotlib
 Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
 Classifier: Programming Language :: Python :: 3.9
 Classifier: Programming Language :: Python :: 3.10
 Classifier: Programming Language :: Python :: 3.11
 Classifier: Programming Language :: Python :: 3.12
 Classifier: Programming Language :: Python :: 3.13
-Classifier: Programming Language :: Python :: 3.14
-Requires-Python: >=3.9
-Description-Content-Type: text/markdown
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown; charset=UTF-8
 License-File: LICENSE.md
-Requires-Dist: packaging
-Provides-Extra: test
-Requires-Dist: pytest>=8.0; extra == "test"
-Requires-Dist: pytest-cov>=5.0; extra == "test"
-Requires-Dist: coverage[toml]>=7.2; extra == "test"
-Provides-Extra: lint
-Requires-Dist: pre-commit==4.3.0; extra == "lint"
-Provides-Extra: dev
-Requires-Dist: changelist==0.5; extra == "dev"
-Requires-Dist: spin==0.15; extra == "dev"
-Dynamic: license-file
+Requires-Dist: audioread>=2.1.9
+Requires-Dist: numba>=0.51.0
+Requires-Dist: numpy>=1.22.3
+Requires-Dist: scipy>=1.6.0
+Requires-Dist: scikit-learn>=1.1.0
+Requires-Dist: joblib>=1.0
+Requires-Dist: decorator>=4.3.0
+Requires-Dist: soundfile>=0.12.1
+Requires-Dist: pooch>=1.1
+Requires-Dist: soxr>=0.3.2
+Requires-Dist: typing_extensions>=4.1.1
+Requires-Dist: lazy_loader>=0.1
+Requires-Dist: msgpack>=1.0
+Requires-Dist: standard-aifc; python_version >= "3.13"
+Requires-Dist: standard-sunau; python_version >= "3.13"
+Provides-Extra: docs
+Requires-Dist: numpydoc; extra == "docs"
+Requires-Dist: sphinx!=1.3.1; extra == "docs"
+Requires-Dist: sphinx_rtd_theme>=1.2.0; extra == "docs"
+Requires-Dist: numba>=0.51; extra == "docs"
+Requires-Dist: matplotlib>=3.5.0; extra == "docs"
+Requires-Dist: sphinx-multiversion>=0.2.3; extra == "docs"
+Requires-Dist: sphinx-gallery>=0.7; extra == "docs"
+Requires-Dist: mir_eval>=0.5; extra == "docs"
+Requires-Dist: ipython>=7.0; extra == "docs"
+Requires-Dist: sphinxcontrib-svg2pdfconverter; extra == "docs"
+Requires-Dist: sphinxcontrib-googleanalytics>=0.4; extra == "docs"
+Requires-Dist: presets; extra == "docs"
+Requires-Dist: sphinx-copybutton>=0.5.2; extra == "docs"
+Provides-Extra: tests
+Requires-Dist: matplotlib>=3.5.0; extra == "tests"
+Requires-Dist: packaging>=20.0; extra == "tests"
+Requires-Dist: pytest-mpl; extra == "tests"
+Requires-Dist: pytest-cov; extra == "tests"
+Requires-Dist: pytest; extra == "tests"
+Requires-Dist: samplerate; extra == "tests"
+Requires-Dist: resampy>=0.2.2; extra == "tests"
+Requires-Dist: types-decorator; extra == "tests"
+Provides-Extra: display
+Requires-Dist: matplotlib>=3.5.0; extra == "display"
 
-[![PyPI](https://img.shields.io/pypi/v/lazy-loader)](https://pypi.org/project/lazy-loader/)
-[![Test status](https://github.com/scientific-python/lazy-loader/workflows/test/badge.svg?branch=main)](https://github.com/scientific-python/lazy-loader/actions?query=workflow%3A%22test%22)
-[![Test coverage](https://codecov.io/gh/scientific-python/lazy-loader/branch/main/graph/badge.svg)](https://app.codecov.io/gh/scientific-python/lazy-loader/branch/main)
+[![librosa logo](docs/img/librosa_logo_text.svg)](https://librosa.org/)
 
-`lazy-loader` makes it easy to load subpackages and functions on demand.
+# librosa
 
-## Motivation
 
-1. Allow subpackages to be made visible to users without incurring import costs.
-2. Allow external libraries to be imported only when used, improving import times.
+A python package for music and audio analysis.  
 
-For a more detailed discussion, see [the SPEC](https://scientific-python.org/specs/spec-0001/).
+[![PyPI](https://img.shields.io/pypi/v/librosa.svg)](https://pypi.python.org/pypi/librosa)
+[![Anaconda-Server Badge](https://anaconda.org/conda-forge/librosa/badges/version.svg)](https://anaconda.org/conda-forge/librosa)
+[![License](https://img.shields.io/pypi/l/librosa.svg)](https://github.com/librosa/librosa/blob/main/LICENSE.md)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.591533.svg)](https://doi.org/10.5281/zenodo.591533)
+
+[![CI](https://github.com/librosa/librosa/actions/workflows/ci.yml/badge.svg)](https://github.com/librosa/librosa/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/librosa/librosa/branch/main/graph/badge.svg?token=ULWnUHaIJC)](https://codecov.io/gh/librosa/librosa)
+[![Docs](https://github.com/librosa/librosa/actions/workflows/docs.yml/badge.svg)](https://librosa.org/doc/latest/index.html)
+
+#  Table of Contents
+
+- [Documentation](#Documentation)
+- [Installation](#Installation)
+  - [Using PyPI](#using-pypi)
+  - [Using Anaconda](#using-anaconda)
+  - [Building From Source](#building-from-source)
+  - [Hints for Installation](#hints-for-the-installation)
+    - [`soundfile`](#soundfile)
+    - [`audioread`](#audioread-and-mp3-support)
+      - [Linux (`apt get`)](#linux-apt-get)
+      - [Linux (`yum`)](#linux-yum)
+      - [Mac](#mac)
+      - [Windows](#windows)
+- [Discussion](#discussion)
+- [Citing](#citing)
+
+---
+
+## Documentation
+
+
+See https://librosa.org/doc/ for a complete reference manual and introductory tutorials.
+
+The [advanced example gallery](https://librosa.org/doc/latest/advanced.html) should give you a quick sense of the kinds
+of things that librosa can do.
+
+---
+
+[Back To Top ↥](#librosa)
+
 
 ## Installation
 
+
+### Using PyPI
+
+The latest stable release is available on PyPI, and you can install it by saying
 ```
-pip install -U lazy-loader
-```
-
-We recommend using `lazy-loader` with Python >= 3.11.
-If using Python 3.11, please upgrade to 3.11.9 or later.
-If using Python 3.12, please upgrade to 3.12.3 or later.
-These versions [avoid](https://github.com/python/cpython/pull/114781) a [known race condition](https://github.com/python/cpython/issues/114763).
-
-## Usage
-
-### Lazily load subpackages
-
-Consider the `__init__.py` from [scikit-image](https://scikit-image.org):
-
-```python
-subpackages = [
-    ...,
-    'filters',
-    ...
-]
-
-import lazy_loader as lazy
-__getattr__, __dir__, _ = lazy.attach(__name__, subpackages)
+python -m pip install librosa
 ```
 
-You can now do:
+### Using Anaconda
 
-```python
-import skimage as ski
-ski.filters.gaussian(...)
+Anaconda users can install using ```conda-forge```:
+```
+conda install -c conda-forge librosa
 ```
 
-The `filters` subpackages will only be loaded once accessed.
+### Building from source
 
-### Lazily load subpackages and functions
+To build librosa from source, say 
+```
+python setup.py build
+```
+Then, to install librosa, say 
+```
+python setup.py install
+```
+If all went well, you should be able to execute the following commands from a python console:
+```
+import librosa
+librosa.show_versions()
+```
+This should print out a description of your software environment, along with the installed versions of other packages used by librosa.
 
-Consider `skimage/filters/__init__.py`:
+📝 OS X users should follow the installation guide given below.
 
-```python
-from ..util import lazy
+Alternatively, you can download or clone the repository and use `pip` to handle dependencies:
 
-__getattr__, __dir__, __all__ = lazy.attach(
-    __name__,
-    submodules=['rank'],
-    submod_attrs={
-        '_gaussian': ['gaussian', 'difference_of_gaussians'],
-        'edges': ['sobel', 'scharr', 'prewitt', 'roberts',
-                  'laplace', 'farid']
-    }
-)
+```
+unzip librosa.zip
+python -m pip install -e librosa
+```
+or
+
+```
+git clone https://github.com/librosa/librosa.git
+python -m pip install -e librosa
 ```
 
-The above is equivalent to:
-
-```python
-from . import rank
-from ._gaussian import gaussian, difference_of_gaussians
-from .edges import (sobel, scharr, prewitt, roberts,
-                    laplace, farid)
+By calling `pip list` you should see `librosa` now as an installed package:
+```
+librosa (0.x.x, /path/to/librosa)
 ```
 
-Except that all subpackages (such as `rank`) and functions (such as `sobel`) are loaded upon access.
+---
 
-### Type checkers
+[Back To Top ↥](#librosa)
 
-Static type checkers and IDEs cannot infer type information from
-lazily loaded imports. As a workaround you can load [type
-stubs](https://mypy.readthedocs.io/en/stable/stubs.html) (`.pyi`
-files) with `lazy.attach_stub`:
+### Hints for the Installation
 
-```python
-import lazy_loader as lazy
-__getattr__, __dir__, _ = lazy.attach_stub(__name__, "subpackages.pyi")
+`librosa` uses `soundfile` and `audioread` to load audio files.
+
+📝 Note that older releases of `soundfile` (prior to 0.11) do not support MP3, which will cause librosa to fall back on the `audioread` library.
+
+### `soundfile`
+
+If you're using `conda` to install librosa, then audio encoding dependencies will be handled automatically.
+
+If you're using `pip` on a Linux environment, you may need to install `libsndfile`
+manually.  Please refer to the [SoundFile installation documentation](https://python-soundfile.readthedocs.io/#installation) for details.
+
+### `audioread` and MP3 support
+
+To fuel `audioread` with more audio-decoding power (e.g., for reading MP3 files),
+you may need to install either *ffmpeg* or *GStreamer*.
+
+📝*Note that on some platforms, `audioread` needs at least one of the programs to work properly.*
+
+If you are using Anaconda, install *ffmpeg* by calling
+
+```
+conda install -c conda-forge ffmpeg
 ```
 
-Note that, since imports are now defined in `.pyi` files, those
-are not only necessary for type checking but also at runtime.
+If you are not using Anaconda, here are some common commands for different operating systems:
 
-The SPEC [describes this workaround in more
-detail](https://scientific-python.org/specs/spec-0001/#type-checkers).
+- ####  Linux (`apt-get`): 
 
-### Early failure
+```
+apt-get install ffmpeg
+```
+or
+ 
+```
+apt-get install gstreamer1.0-plugins-base gstreamer1.0-plugins-ugly
+```
+- #### Linux (`yum`):
+```
+yum install ffmpeg
+```
+or
 
-With lazy loading, missing imports no longer fail upon loading the
-library. During development and testing, you can set the `EAGER_IMPORT`
-environment variable to "1" or "true" to disable lazy loading ("0" or "" re-enables lazy loading).
 
-### External libraries
-
-The `lazy.attach` function discussed above is used to set up package
-internal imports.
-
-Use `lazy.load` to lazily import external libraries:
-
-```python
-sp = lazy.load('scipy')  # `sp` will only be loaded when accessed
-sp.linalg.norm(...)
+```
+yum install gstreamer1.0-plugins-base gstreamer1.0-plugins-ugly
 ```
 
-_Note that lazily importing *sub*packages,
-i.e. `load('scipy.linalg')` will cause the package containing the
-subpackage to be imported immediately; thus, this usage is
-discouraged._
+- #### Mac: 
+```
+brew install ffmpeg
+```
+or
 
-You can ask `lazy.load` to raise import errors as soon as it is called:
-
-```python
-linalg = lazy.load('scipy.linalg', error_on_import=True)
+```
+brew install gstreamer
 ```
 
-#### Optional requirements
+- #### Windows: 
 
-One use for lazy loading is for loading optional dependencies, with
-`ImportErrors` only arising when optional functionality is accessed. If optional
-functionality depends on a specific version, a version requirement can
-be set:
+download ffmpeg binaries from this [website](https://www.gyan.dev/ffmpeg/builds/) or gstreamer binaries from this [website](https://gstreamer.freedesktop.org/)
 
-```python
-np = lazy.load("numpy", require="numpy >=1.24")
+For GStreamer, you also need to install the Python bindings with 
+
+```
+python -m pip install pygobject
 ```
 
-In this case, if `numpy` is installed, but the version is less than 1.24,
-the `np` module returned will raise an error on attribute access. Using
-this feature is not all-or-nothing: One module may rely on one version of
-numpy, while another module may not set any requirement.
+---
 
-_Note that the requirement must use the package [distribution name][] instead
-of the module [import name][]. For example, the `pyyaml` distribution provides
-the `yaml` module for import._
+[Back To Top ↥](#librosa)
 
-[distribution name]: https://packaging.python.org/en/latest/glossary/#term-Distribution-Package
-[import name]: https://packaging.python.org/en/latest/glossary/#term-Import-Package
+## Discussion
+
+
+Please direct non-development questions and discussion topics to our web forum at
+https://groups.google.com/forum/#!forum/librosa
+
+---
+
+[Back To Top ↥](#librosa)
+
+## Citing
+
+
+If you want to cite librosa in a scholarly work, there are two ways to do it.
+
+- If you are using the library for your work, for the sake of reproducibility, please cite
+  the version you used as indexed at Zenodo:
+
+    [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.591533.svg)](https://doi.org/10.5281/zenodo.591533)
+
+  From librosa version 0.10.2 or later, you can also use `librosa.cite()`
+  to get the DOI link for any version of librosa.
+
+- If you wish to cite librosa for its design, motivation, etc., please cite the paper
+  published at SciPy 2015:
+
+    McFee, Brian, Colin Raffel, Dawen Liang, Daniel PW Ellis, Matt McVicar, Eric Battenberg, and Oriol Nieto. "librosa: Audio and music signal analysis in python." In Proceedings of the 14th python in science conference, pp. 18-25. 2015.
+
+---
+
+[Back To Top ↥](#librosa)
