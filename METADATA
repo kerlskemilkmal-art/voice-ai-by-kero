@@ -1,60 +1,84 @@
-Metadata-Version: 2.1
-Name: itsdangerous
-Version: 2.2.0
-Summary: Safely pass data to untrusted environments and back.
+Metadata-Version: 2.4
+Name: Jinja2
+Version: 3.1.6
+Summary: A very fast and expressive template engine.
 Maintainer-email: Pallets <contact@palletsprojects.com>
-Requires-Python: >=3.8
+Requires-Python: >=3.7
 Description-Content-Type: text/markdown
 Classifier: Development Status :: 5 - Production/Stable
+Classifier: Environment :: Web Environment
 Classifier: Intended Audience :: Developers
 Classifier: License :: OSI Approved :: BSD License
 Classifier: Operating System :: OS Independent
 Classifier: Programming Language :: Python
+Classifier: Topic :: Internet :: WWW/HTTP :: Dynamic Content
+Classifier: Topic :: Text Processing :: Markup :: HTML
 Classifier: Typing :: Typed
-Project-URL: Changes, https://itsdangerous.palletsprojects.com/changes/
+License-File: LICENSE.txt
+Requires-Dist: MarkupSafe>=2.0
+Requires-Dist: Babel>=2.7 ; extra == "i18n"
+Project-URL: Changes, https://jinja.palletsprojects.com/changes/
 Project-URL: Chat, https://discord.gg/pallets
-Project-URL: Documentation, https://itsdangerous.palletsprojects.com/
+Project-URL: Documentation, https://jinja.palletsprojects.com/
 Project-URL: Donate, https://palletsprojects.com/donate
-Project-URL: Source, https://github.com/pallets/itsdangerous/
+Project-URL: Source, https://github.com/pallets/jinja/
+Provides-Extra: i18n
 
-# ItsDangerous
+# Jinja
 
-... so better sign this
+Jinja is a fast, expressive, extensible templating engine. Special
+placeholders in the template allow writing code similar to Python
+syntax. Then the template is passed data to render the final document.
 
-Various helpers to pass data to untrusted environments and to get it
-back safe and sound. Data is cryptographically signed to ensure that a
-token has not been tampered with.
+It includes:
 
-It's possible to customize how data is serialized. Data is compressed as
-needed. A timestamp can be added and verified automatically while
-loading a token.
+-   Template inheritance and inclusion.
+-   Define and import macros within templates.
+-   HTML templates can use autoescaping to prevent XSS from untrusted
+    user input.
+-   A sandboxed environment can safely render untrusted templates.
+-   AsyncIO support for generating templates and calling async
+    functions.
+-   I18N support with Babel.
+-   Templates are compiled to optimized Python code just-in-time and
+    cached, or can be compiled ahead-of-time.
+-   Exceptions point to the correct line in templates to make debugging
+    easier.
+-   Extensible filters, tests, functions, and even syntax.
+
+Jinja's philosophy is that while application logic belongs in Python if
+possible, it shouldn't make the template designer's job difficult by
+restricting functionality too much.
 
 
-## A Simple Example
+## In A Nutshell
 
-Here's how you could generate a token for transmitting a user's id and
-name between web requests.
-
-```python
-from itsdangerous import URLSafeSerializer
-auth_s = URLSafeSerializer("secret key", "auth")
-token = auth_s.dumps({"id": 5, "name": "itsdangerous"})
-
-print(token)
-# eyJpZCI6NSwibmFtZSI6Iml0c2Rhbmdlcm91cyJ9.6YP6T0BaO67XP--9UzTrmurXSmg
-
-data = auth_s.loads(token)
-print(data["name"])
-# itsdangerous
+```jinja
+{% extends "base.html" %}
+{% block title %}Members{% endblock %}
+{% block content %}
+  <ul>
+  {% for user in users %}
+    <li><a href="{{ user.url }}">{{ user.username }}</a></li>
+  {% endfor %}
+  </ul>
+{% endblock %}
 ```
-
 
 ## Donate
 
-The Pallets organization develops and supports ItsDangerous and other
-popular packages. In order to grow the community of contributors and
-users, and allow the maintainers to devote more time to the projects,
-[please donate today][].
+The Pallets organization develops and supports Jinja and other popular
+packages. In order to grow the community of contributors and users, and
+allow the maintainers to devote more time to the projects, [please
+donate today][].
 
 [please donate today]: https://palletsprojects.com/donate
+
+## Contributing
+
+See our [detailed contributing documentation][contrib] for many ways to
+contribute, including reporting issues, requesting features, asking or answering
+questions, and making PRs.
+
+[contrib]: https://palletsprojects.com/contributing/
 
