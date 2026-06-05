@@ -1,79 +1,124 @@
-import inspect
-import annotationlib
-from builtins import dict as _dict  # alias to avoid conflicts with attribute name
-from collections.abc import Callable, Generator, Iterator
-from contextlib import _GeneratorContextManager
-from inspect import Signature, getfullargspec as getfullargspec, iscoroutinefunction as iscoroutinefunction
-from re import Pattern
-from typing import Any, Final, Literal, TypeVar, Tuple
-from typing_extensions import ParamSpec
+from .convert import (
+    frames_to_samples as frames_to_samples,
+    frames_to_time as frames_to_time,
+    samples_to_frames as samples_to_frames,
+    samples_to_time as samples_to_time,
+    time_to_samples as time_to_samples,
+    time_to_frames as time_to_frames,
+    blocks_to_samples as blocks_to_samples,
+    blocks_to_frames as blocks_to_frames,
+    blocks_to_time as blocks_to_time,
+    note_to_hz as note_to_hz,
+    note_to_midi as note_to_midi,
+    midi_to_hz as midi_to_hz,
+    midi_to_note as midi_to_note,
+    hz_to_note as hz_to_note,
+    hz_to_midi as hz_to_midi,
+    hz_to_mel as hz_to_mel,
+    hz_to_octs as hz_to_octs,
+    hz_to_fjs as hz_to_fjs,
+    mel_to_hz as mel_to_hz,
+    octs_to_hz as octs_to_hz,
+    A4_to_tuning as A4_to_tuning,
+    tuning_to_A4 as tuning_to_A4,
+    fft_frequencies as fft_frequencies,
+    cqt_frequencies as cqt_frequencies,
+    mel_frequencies as mel_frequencies,
+    tempo_frequencies as tempo_frequencies,
+    fourier_tempo_frequencies as fourier_tempo_frequencies,
+    A_weighting as A_weighting,
+    B_weighting as B_weighting,
+    C_weighting as C_weighting,
+    D_weighting as D_weighting,
+    Z_weighting as Z_weighting,
+    frequency_weighting as frequency_weighting,
+    multi_frequency_weighting as multi_frequency_weighting,
+    samples_like as samples_like,
+    times_like as times_like,
+    midi_to_svara_h as midi_to_svara_h,
+    midi_to_svara_c as midi_to_svara_c,
+    note_to_svara_h as note_to_svara_h,
+    note_to_svara_c as note_to_svara_c,
+    hz_to_svara_h as hz_to_svara_h,
+    hz_to_svara_c as hz_to_svara_c,
+)
 
-_C = TypeVar("_C", bound=Callable[..., Any])
-_Func = TypeVar("_Func", bound=Callable[..., Any])
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
+from .audio import (
+    load as load,
+    stream as stream,
+    to_mono as to_mono,
+    resample as resample,
+    get_duration as get_duration,
+    get_samplerate as get_samplerate,
+    autocorrelate as autocorrelate,
+    lpc as lpc,
+    zero_crossings as zero_crossings,
+    clicks as clicks,
+    tone as tone,
+    chirp as chirp,
+    mu_compress as mu_compress,
+    mu_expand as mu_expand,
+)
 
-DEF: Final[Pattern[str]]
-POS: Final[Literal[inspect._ParameterKind.POSITIONAL_OR_KEYWORD]]
-EMPTY: Final[type[inspect._empty]]
+from .spectrum import (
+    stft as stft,
+    istft as istft,
+    magphase as magphase,
+    iirt as iirt,
+    reassigned_spectrogram as reassigned_spectrogram,
+    phase_vocoder as phase_vocoder,
+    perceptual_weighting as perceptual_weighting,
+    power_to_db as power_to_db,
+    db_to_power as db_to_power,
+    amplitude_to_db as amplitude_to_db,
+    db_to_amplitude as db_to_amplitude,
+    fmt as fmt,
+    pcen as pcen,
+    griffinlim as griffinlim,
+)
 
-def inspect_sig(
-    func: _Func
-) -> Tuple: ...
+from .pitch import (
+    estimate_tuning as estimate_tuning,
+    pitch_tuning as pitch_tuning,
+    piptrack as piptrack,
+    yin as yin,
+    pyin as pyin,
+)
 
+from .constantq import (
+    cqt as cqt,
+    hybrid_cqt as hybrid_cqt,
+    pseudo_cqt as pseudo_cqt,
+    icqt as icqt,
+    griffinlim_cqt as griffinlim_cqt,
+    vqt as vqt,
+)
 
-class FunctionMaker:
-    args: list[str]
-    varargs: str | None
-    varkw: str | None
-    defaults: tuple[Any, ...] | None
-    kwonlyargs: list[str]
-    kwonlydefaults: dict[str, Any] | None
-    shortsignature: str | None
-    name: str
-    doc: str | None
-    module: str | None
-    annotations: _dict[str, Any]
-    signature: str
-    dict: _dict[str, Any]
-    def __init__(
-        self,
-        func: Callable[..., Any] | None = ...,
-        name: str | None = ...,
-        signature: str | None = ...,
-        defaults: tuple[Any, ...] | None = ...,
-        doc: str | None = ...,
-        module: str | None = ...,
-        funcdict: _dict[str, Any] | None = ...,
-    ) -> None: ...
-    def update(self, func: Any, **kw: Any) -> None: ...
-    def make(
-        self, src_templ: str, evaldict: _dict[str, Any] | None = ..., addsource: bool = ..., **attrs: Any
-    ) -> Callable[..., Any]: ...
-    @classmethod
-    def create(
-        cls,
-        obj: Any,
-        body: str,
-        evaldict: _dict[str, Any],
-        defaults: tuple[Any, ...] | None = ...,
-        doc: str | None = ...,
-        module: str | None = ...,
-        addsource: bool = ...,
-        **attrs: Any,
-    ) -> Callable[..., Any]: ...
+from .harmonic import (
+    salience as salience,
+    interp_harmonics as interp_harmonics,
+    f0_harmonics as f0_harmonics,
+)
 
-def fix(args: tuple[Any, ...], kwargs: dict[str, Any], sig: Signature) -> tuple[tuple[Any, ...], dict[str, Any]]: ...
-def decorate(func: _Func, caller: Callable[..., Any], extras: tuple[Any, ...] = ..., kwsyntax: bool = False) -> _Func: ...
-def decoratorx(caller: Callable[..., Any]) -> Callable[..., Any]: ...
-def decorator(
-    caller: Callable[..., Any], _func: Callable[..., Any] | None = None, kwsyntax: bool = False
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]: ...
+from .fft import (
+    get_fftlib as get_fftlib,
+    set_fftlib as set_fftlib,
+)
 
-class ContextManager(_GeneratorContextManager[_T]):
-    def __init__(self, g: Callable[..., Generator[_T]], *a: Any, **k: Any) -> None: ...
-    def __call__(self, func: _C) -> _C: ...
+from .notation import (
+    key_to_degrees as key_to_degrees,
+    key_to_notes as key_to_notes,
+    mela_to_degrees as mela_to_degrees,
+    mela_to_svara as mela_to_svara,
+    thaat_to_degrees as thaat_to_degrees,
+    list_mela as list_mela,
+    list_thaat as list_thaat,
+    fifths_to_note as fifths_to_note,
+    interval_to_fjs as interval_to_fjs,
+)
 
-def contextmanager(func: Callable[_P, Iterator[_T]]) -> Callable[_P, ContextManager[_T]]: ...
-def append(a: type, vancestors: list[type]) -> None: ...
-def dispatch_on(*dispatch_args: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]: ...
+from .intervals import (
+    interval_frequencies as interval_frequencies,
+    pythagorean_intervals as pythagorean_intervals,
+    plimit_intervals as plimit_intervals,
+)

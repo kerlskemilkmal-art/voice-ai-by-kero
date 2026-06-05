@@ -1,1873 +1,1669 @@
-"""Built-in template filters used with the ``|`` operator."""
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+Filters
+=======
 
-import math
-import random
-import re
-import typing
-import typing as t
-from collections import abc
-from inspect import getattr_static
-from itertools import chain
-from itertools import groupby
+Filter bank construction
+------------------------
+.. autosummary::
+    :toctree: generated/
 
-from markupsafe import escape
-from markupsafe import Markup
-from markupsafe import soft_str
+    mel
+    chroma
+    wavelet
+    semitone_filterbank
 
-from .async_utils import async_variant
-from .async_utils import auto_aiter
-from .async_utils import auto_await
-from .async_utils import auto_to_list
-from .exceptions import FilterArgumentError
-from .runtime import Undefined
-from .utils import htmlsafe_json_dumps
-from .utils import pass_context
-from .utils import pass_environment
-from .utils import pass_eval_context
-from .utils import pformat
-from .utils import url_quote
-from .utils import urlize
+Window functions
+----------------
+.. autosummary::
+    :toctree: generated/
 
-if t.TYPE_CHECKING:
-    import typing_extensions as te
+    window_bandwidth
+    get_window
 
-    from .environment import Environment
-    from .nodes import EvalContext
-    from .runtime import Context
-    from .sandbox import SandboxedEnvironment  # noqa: F401
+Miscellaneous
+-------------
+.. autosummary::
+    :toctree: generated/
 
-    class HasHTML(te.Protocol):
-        def __html__(self) -> str:
-            pass
+    wavelet_lengths
+    cq_to_chroma
+    mr_frequencies
+    window_sumsquare
+    diagonal_filter
+
+Deprecated
+----------
+.. autosummary::
+    :toctree: generated/
+
+    constant_q
+    constant_q_lengths
+
+"""
+import warnings
+
+import numpy as np
+import scipy
+import scipy.signal
+import scipy.ndimage
+
+from numba import jit
+
+from ._cache import cache
+from . import util
+from .util.exceptions import ParameterError
+from .util.decorators import deprecated
+
+from .core.convert import note_to_hz, hz_to_midi, midi_to_hz, hz_to_octs
+from .core.convert import fft_frequencies, mel_frequencies
+from numpy.typing import ArrayLike, DTypeLike
+from typing import Any, List, Optional, Tuple, Union
+from typing_extensions import Literal
+from ._typing import _WindowSpec, _FloatLike_co
+
+__all__ = [
+    "mel",
+    "chroma",
+    "constant_q",
+    "constant_q_lengths",
+    "cq_to_chroma",
+    "window_bandwidth",
+    "get_window",
+    "mr_frequencies",
+    "semitone_filterbank",
+    "window_sumsquare",
+    "diagonal_filter",
+    "wavelet",
+    "wavelet_lengths",
+]
+
+# Dictionary of window function bandwidths
+
+WINDOW_BANDWIDTHS = {
+    "bart": 1.3334961334912805,
+    "barthann": 1.4560255965133932,
+    "bartlett": 1.3334961334912805,
+    "bkh": 2.0045975283585014,
+    "black": 1.7269681554262326,
+    "blackharr": 2.0045975283585014,
+    "blackman": 1.7269681554262326,
+    "blackmanharris": 2.0045975283585014,
+    "blk": 1.7269681554262326,
+    "bman": 1.7859588613860062,
+    "bmn": 1.7859588613860062,
+    "bohman": 1.7859588613860062,
+    "box": 1.0,
+    "boxcar": 1.0,
+    "brt": 1.3334961334912805,
+    "brthan": 1.4560255965133932,
+    "bth": 1.4560255965133932,
+    "cosine": 1.2337005350199792,
+    "flat": 2.7762255046484143,
+    "flattop": 2.7762255046484143,
+    "flt": 2.7762255046484143,
+    "halfcosine": 1.2337005350199792,
+    "ham": 1.3629455320350348,
+    "hamm": 1.3629455320350348,
+    "hamming": 1.3629455320350348,
+    "han": 1.50018310546875,
+    "hann": 1.50018310546875,
+    "nut": 1.9763500280946082,
+    "nutl": 1.9763500280946082,
+    "nuttall": 1.9763500280946082,
+    "ones": 1.0,
+    "par": 1.9174603174603191,
+    "parz": 1.9174603174603191,
+    "parzen": 1.9174603174603191,
+    "rect": 1.0,
+    "rectangular": 1.0,
+    "tri": 1.3331706523555851,
+    "triang": 1.3331706523555851,
+    "triangle": 1.3331706523555851,
+}
 
 
-F = t.TypeVar("F", bound=t.Callable[..., t.Any])
-K = t.TypeVar("K")
-V = t.TypeVar("V")
+@cache(level=10)
+def mel(
+    *,
+    sr: float,
+    n_fft: int,
+    n_mels: int = 128,
+    fmin: float = 0.0,
+    fmax: Optional[float] = None,
+    htk: bool = False,
+    norm: Optional[Union[Literal["slaney"], float]] = "slaney",
+    dtype: DTypeLike = np.float32,
+) -> np.ndarray:
+    """Create a Mel filter-bank.
 
+    This produces a linear transformation matrix to project
+    FFT bins onto Mel-frequency bins.
 
-def ignore_case(value: V) -> V:
-    """For use as a postprocessor for :func:`make_attrgetter`. Converts strings
-    to lowercase and returns other types as-is."""
-    if isinstance(value, str):
-        return t.cast(V, value.lower())
+    Parameters
+    ----------
+    sr : number > 0 [scalar]
+        sampling rate of the incoming signal
 
-    return value
+    n_fft : int > 0 [scalar]
+        number of FFT components
 
+    n_mels : int > 0 [scalar]
+        number of Mel bands to generate
 
-def make_attrgetter(
-    environment: "Environment",
-    attribute: t.Optional[t.Union[str, int]],
-    postprocess: t.Optional[t.Callable[[t.Any], t.Any]] = None,
-    default: t.Optional[t.Any] = None,
-) -> t.Callable[[t.Any], t.Any]:
-    """Returns a callable that looks up the given attribute from a
-    passed object with the rules of the environment.  Dots are allowed
-    to access attributes of attributes.  Integer parts in paths are
-    looked up as integers.
+    fmin : float >= 0 [scalar]
+        lowest frequency (in Hz)
+
+    fmax : float >= 0 [scalar]
+        highest frequency (in Hz).
+        If `None`, use ``fmax = sr / 2.0``
+
+    htk : bool [scalar]
+        use HTK formula instead of Slaney
+
+    norm : {None, 'slaney', or number} [scalar]
+        If 'slaney', divide the triangular mel weights by the width of the mel band
+        (area normalization).
+
+        If numeric, use `librosa.util.normalize` to normalize each filter by to unit l_p norm.
+        See `librosa.util.normalize` for a full description of supported norm values
+        (including `+-np.inf`).
+
+        Otherwise, leave all the triangles aiming for a peak value of 1.0
+
+    dtype : np.dtype
+        The data type of the output basis.
+        By default, uses 32-bit (single-precision) floating point.
+
+    Returns
+    -------
+    M : np.ndarray [shape=(n_mels, 1 + n_fft/2)]
+        Mel transform matrix
+
+    See Also
+    --------
+    librosa.util.normalize
+
+    Notes
+    -----
+    This function caches at level 10.
+
+    Examples
+    --------
+    >>> melfb = librosa.filters.mel(sr=22050, n_fft=2048)
+    >>> melfb
+    array([[ 0.   ,  0.016, ...,  0.   ,  0.   ],
+           [ 0.   ,  0.   , ...,  0.   ,  0.   ],
+           ...,
+           [ 0.   ,  0.   , ...,  0.   ,  0.   ],
+           [ 0.   ,  0.   , ...,  0.   ,  0.   ]])
+
+    Clip the maximum frequency to 8KHz
+
+    >>> librosa.filters.mel(sr=22050, n_fft=2048, fmax=8000)
+    array([[ 0.  ,  0.02, ...,  0.  ,  0.  ],
+           [ 0.  ,  0.  , ...,  0.  ,  0.  ],
+           ...,
+           [ 0.  ,  0.  , ...,  0.  ,  0.  ],
+           [ 0.  ,  0.  , ...,  0.  ,  0.  ]])
+
+    >>> import matplotlib.pyplot as plt
+    >>> fig, ax = plt.subplots()
+    >>> img = librosa.display.specshow(melfb, x_axis='linear', ax=ax)
+    >>> ax.set(ylabel='Mel filter', title='Mel filter bank')
+    >>> fig.colorbar(img, ax=ax)
     """
-    parts = _prepare_attribute_parts(attribute)
-
-    def attrgetter(item: t.Any) -> t.Any:
-        for part in parts:
-            item = environment.getitem(item, part)
-
-            if default is not None and isinstance(item, Undefined):
-                item = default
-
-        if postprocess is not None:
-            item = postprocess(item)
-
-        return item
-
-    return attrgetter
-
-
-def make_multi_attrgetter(
-    environment: "Environment",
-    attribute: t.Optional[t.Union[str, int]],
-    postprocess: t.Optional[t.Callable[[t.Any], t.Any]] = None,
-) -> t.Callable[[t.Any], t.List[t.Any]]:
-    """Returns a callable that looks up the given comma separated
-    attributes from a passed object with the rules of the environment.
-    Dots are allowed to access attributes of each attribute.  Integer
-    parts in paths are looked up as integers.
-
-    The value returned by the returned callable is a list of extracted
-    attribute values.
-
-    Examples of attribute: "attr1,attr2", "attr1.inner1.0,attr2.inner2.0", etc.
-    """
-    if isinstance(attribute, str):
-        split: t.Sequence[t.Union[str, int, None]] = attribute.split(",")
-    else:
-        split = [attribute]
-
-    parts = [_prepare_attribute_parts(item) for item in split]
-
-    def attrgetter(item: t.Any) -> t.List[t.Any]:
-        items = [None] * len(parts)
-
-        for i, attribute_part in enumerate(parts):
-            item_i = item
-
-            for part in attribute_part:
-                item_i = environment.getitem(item_i, part)
-
-            if postprocess is not None:
-                item_i = postprocess(item_i)
-
-            items[i] = item_i
-
-        return items
-
-    return attrgetter
-
-
-def _prepare_attribute_parts(
-    attr: t.Optional[t.Union[str, int]],
-) -> t.List[t.Union[str, int]]:
-    if attr is None:
-        return []
-
-    if isinstance(attr, str):
-        return [int(x) if x.isdigit() else x for x in attr.split(".")]
-
-    return [attr]
-
-
-def do_forceescape(value: "t.Union[str, HasHTML]") -> Markup:
-    """Enforce HTML escaping.  This will probably double escape variables."""
-    if hasattr(value, "__html__"):
-        value = t.cast("HasHTML", value).__html__()
-
-    return escape(str(value))
-
-
-def do_urlencode(
-    value: t.Union[str, t.Mapping[str, t.Any], t.Iterable[t.Tuple[str, t.Any]]],
-) -> str:
-    """Quote data for use in a URL path or query using UTF-8.
-
-    Basic wrapper around :func:`urllib.parse.quote` when given a
-    string, or :func:`urllib.parse.urlencode` for a dict or iterable.
-
-    :param value: Data to quote. A string will be quoted directly. A
-        dict or iterable of ``(key, value)`` pairs will be joined as a
-        query string.
-
-    When given a string, "/" is not quoted. HTTP servers treat "/" and
-    "%2F" equivalently in paths. If you need quoted slashes, use the
-    ``|replace("/", "%2F")`` filter.
-
-    .. versionadded:: 2.7
-    """
-    if isinstance(value, str) or not isinstance(value, abc.Iterable):
-        return url_quote(value)
-
-    if isinstance(value, dict):
-        items: t.Iterable[t.Tuple[str, t.Any]] = value.items()
-    else:
-        items = value  # type: ignore
-
-    return "&".join(
-        f"{url_quote(k, for_qs=True)}={url_quote(v, for_qs=True)}" for k, v in items
-    )
-
-
-@pass_eval_context
-def do_replace(
-    eval_ctx: "EvalContext", s: str, old: str, new: str, count: t.Optional[int] = None
-) -> str:
-    """Return a copy of the value with all occurrences of a substring
-    replaced with a new one. The first argument is the substring
-    that should be replaced, the second is the replacement string.
-    If the optional third argument ``count`` is given, only the first
-    ``count`` occurrences are replaced:
-
-    .. sourcecode:: jinja
-
-        {{ "Hello World"|replace("Hello", "Goodbye") }}
-            -> Goodbye World
-
-        {{ "aaaaargh"|replace("a", "d'oh, ", 2) }}
-            -> d'oh, d'oh, aaargh
-    """
-    if count is None:
-        count = -1
-
-    if not eval_ctx.autoescape:
-        return str(s).replace(str(old), str(new), count)
-
-    if (
-        hasattr(old, "__html__")
-        or hasattr(new, "__html__")
-        and not hasattr(s, "__html__")
-    ):
-        s = escape(s)
-    else:
-        s = soft_str(s)
-
-    return s.replace(soft_str(old), soft_str(new), count)
-
-
-def do_upper(s: str) -> str:
-    """Convert a value to uppercase."""
-    return soft_str(s).upper()
-
-
-def do_lower(s: str) -> str:
-    """Convert a value to lowercase."""
-    return soft_str(s).lower()
-
-
-def do_items(value: t.Union[t.Mapping[K, V], Undefined]) -> t.Iterator[t.Tuple[K, V]]:
-    """Return an iterator over the ``(key, value)`` items of a mapping.
-
-    ``x|items`` is the same as ``x.items()``, except if ``x`` is
-    undefined an empty iterator is returned.
-
-    This filter is useful if you expect the template to be rendered with
-    an implementation of Jinja in another programming language that does
-    not have a ``.items()`` method on its mapping type.
-
-    .. code-block:: html+jinja
-
-        <dl>
-        {% for key, value in my_dict|items %}
-            <dt>{{ key }}
-            <dd>{{ value }}
-        {% endfor %}
-        </dl>
-
-    .. versionadded:: 3.1
-    """
-    if isinstance(value, Undefined):
-        return
-
-    if not isinstance(value, abc.Mapping):
-        raise TypeError("Can only get item pairs from a mapping.")
-
-    yield from value.items()
-
-
-# Check for characters that would move the parser state from key to value.
-# https://html.spec.whatwg.org/#attribute-name-state
-_attr_key_re = re.compile(r"[\s/>=]", flags=re.ASCII)
-
-
-@pass_eval_context
-def do_xmlattr(
-    eval_ctx: "EvalContext", d: t.Mapping[str, t.Any], autospace: bool = True
-) -> str:
-    """Create an SGML/XML attribute string based on the items in a dict.
-
-    **Values** that are neither ``none`` nor ``undefined`` are automatically
-    escaped, safely allowing untrusted user input.
-
-    User input should not be used as **keys** to this filter. If any key
-    contains a space, ``/`` solidus, ``>`` greater-than sign, or ``=`` equals
-    sign, this fails with a ``ValueError``. Regardless of this, user input
-    should never be used as keys to this filter, or must be separately validated
-    first.
-
-    .. sourcecode:: html+jinja
-
-        <ul{{ {'class': 'my_list', 'missing': none,
-                'id': 'list-%d'|format(variable)}|xmlattr }}>
-        ...
-        </ul>
-
-    Results in something like this:
-
-    .. sourcecode:: html
-
-        <ul class="my_list" id="list-42">
-        ...
-        </ul>
-
-    As you can see it automatically prepends a space in front of the item
-    if the filter returned something unless the second parameter is false.
-
-    .. versionchanged:: 3.1.4
-        Keys with ``/`` solidus, ``>`` greater-than sign, or ``=`` equals sign
-        are not allowed.
-
-    .. versionchanged:: 3.1.3
-        Keys with spaces are not allowed.
-    """
-    items = []
-
-    for key, value in d.items():
-        if value is None or isinstance(value, Undefined):
-            continue
-
-        if _attr_key_re.search(key) is not None:
-            raise ValueError(f"Invalid character in attribute name: {key!r}")
-
-        items.append(f'{escape(key)}="{escape(value)}"')
-
-    rv = " ".join(items)
-
-    if autospace and rv:
-        rv = " " + rv
-
-    if eval_ctx.autoescape:
-        rv = Markup(rv)
-
-    return rv
-
-
-def do_capitalize(s: str) -> str:
-    """Capitalize a value. The first character will be uppercase, all others
-    lowercase.
-    """
-    return soft_str(s).capitalize()
-
-
-_word_beginning_split_re = re.compile(r"([-\s({\[<]+)")
-
-
-def do_title(s: str) -> str:
-    """Return a titlecased version of the value. I.e. words will start with
-    uppercase letters, all remaining characters are lowercase.
-    """
-    return "".join(
-        [
-            item[0].upper() + item[1:].lower()
-            for item in _word_beginning_split_re.split(soft_str(s))
-            if item
-        ]
-    )
-
-
-def do_dictsort(
-    value: t.Mapping[K, V],
-    case_sensitive: bool = False,
-    by: 'te.Literal["key", "value"]' = "key",
-    reverse: bool = False,
-) -> t.List[t.Tuple[K, V]]:
-    """Sort a dict and yield (key, value) pairs. Python dicts may not
-    be in the order you want to display them in, so sort them first.
-
-    .. sourcecode:: jinja
-
-        {% for key, value in mydict|dictsort %}
-            sort the dict by key, case insensitive
-
-        {% for key, value in mydict|dictsort(reverse=true) %}
-            sort the dict by key, case insensitive, reverse order
-
-        {% for key, value in mydict|dictsort(true) %}
-            sort the dict by key, case sensitive
-
-        {% for key, value in mydict|dictsort(false, 'value') %}
-            sort the dict by value, case insensitive
-    """
-    if by == "key":
-        pos = 0
-    elif by == "value":
-        pos = 1
-    else:
-        raise FilterArgumentError('You can only sort by either "key" or "value"')
-
-    def sort_func(item: t.Tuple[t.Any, t.Any]) -> t.Any:
-        value = item[pos]
-
-        if not case_sensitive:
-            value = ignore_case(value)
-
-        return value
-
-    return sorted(value.items(), key=sort_func, reverse=reverse)
-
-
-@pass_environment
-def do_sort(
-    environment: "Environment",
-    value: "t.Iterable[V]",
-    reverse: bool = False,
-    case_sensitive: bool = False,
-    attribute: t.Optional[t.Union[str, int]] = None,
-) -> "t.List[V]":
-    """Sort an iterable using Python's :func:`sorted`.
-
-    .. sourcecode:: jinja
-
-        {% for city in cities|sort %}
-            ...
-        {% endfor %}
-
-    :param reverse: Sort descending instead of ascending.
-    :param case_sensitive: When sorting strings, sort upper and lower
-        case separately.
-    :param attribute: When sorting objects or dicts, an attribute or
-        key to sort by. Can use dot notation like ``"address.city"``.
-        Can be a list of attributes like ``"age,name"``.
-
-    The sort is stable, it does not change the relative order of
-    elements that compare equal. This makes it is possible to chain
-    sorts on different attributes and ordering.
-
-    .. sourcecode:: jinja
-
-        {% for user in users|sort(attribute="name")
-            |sort(reverse=true, attribute="age") %}
-            ...
-        {% endfor %}
-
-    As a shortcut to chaining when the direction is the same for all
-    attributes, pass a comma separate list of attributes.
-
-    .. sourcecode:: jinja
-
-        {% for user in users|sort(attribute="age,name") %}
-            ...
-        {% endfor %}
-
-    .. versionchanged:: 2.11.0
-        The ``attribute`` parameter can be a comma separated list of
-        attributes, e.g. ``"age,name"``.
-
-    .. versionchanged:: 2.6
-       The ``attribute`` parameter was added.
-    """
-    key_func = make_multi_attrgetter(
-        environment, attribute, postprocess=ignore_case if not case_sensitive else None
-    )
-    return sorted(value, key=key_func, reverse=reverse)
-
-
-@pass_environment
-def sync_do_unique(
-    environment: "Environment",
-    value: "t.Iterable[V]",
-    case_sensitive: bool = False,
-    attribute: t.Optional[t.Union[str, int]] = None,
-) -> "t.Iterator[V]":
-    """Returns a list of unique items from the given iterable.
-
-    .. sourcecode:: jinja
-
-        {{ ['foo', 'bar', 'foobar', 'FooBar']|unique|list }}
-            -> ['foo', 'bar', 'foobar']
-
-    The unique items are yielded in the same order as their first occurrence in
-    the iterable passed to the filter.
-
-    :param case_sensitive: Treat upper and lower case strings as distinct.
-    :param attribute: Filter objects with unique values for this attribute.
-    """
-    getter = make_attrgetter(
-        environment, attribute, postprocess=ignore_case if not case_sensitive else None
-    )
-    seen = set()
-
-    for item in value:
-        key = getter(item)
-
-        if key not in seen:
-            seen.add(key)
-            yield item
-
-
-@async_variant(sync_do_unique)  # type: ignore
-async def do_unique(
-    environment: "Environment",
-    value: "t.Union[t.AsyncIterable[V], t.Iterable[V]]",
-    case_sensitive: bool = False,
-    attribute: t.Optional[t.Union[str, int]] = None,
-) -> "t.Iterator[V]":
-    return sync_do_unique(
-        environment, await auto_to_list(value), case_sensitive, attribute
-    )
-
-
-def _min_or_max(
-    environment: "Environment",
-    value: "t.Iterable[V]",
-    func: "t.Callable[..., V]",
-    case_sensitive: bool,
-    attribute: t.Optional[t.Union[str, int]],
-) -> "t.Union[V, Undefined]":
-    it = iter(value)
-
-    try:
-        first = next(it)
-    except StopIteration:
-        return environment.undefined("No aggregated item, sequence was empty.")
-
-    key_func = make_attrgetter(
-        environment, attribute, postprocess=ignore_case if not case_sensitive else None
-    )
-    return func(chain([first], it), key=key_func)
-
-
-@pass_environment
-def do_min(
-    environment: "Environment",
-    value: "t.Iterable[V]",
-    case_sensitive: bool = False,
-    attribute: t.Optional[t.Union[str, int]] = None,
-) -> "t.Union[V, Undefined]":
-    """Return the smallest item from the sequence.
-
-    .. sourcecode:: jinja
-
-        {{ [1, 2, 3]|min }}
-            -> 1
-
-    :param case_sensitive: Treat upper and lower case strings as distinct.
-    :param attribute: Get the object with the min value of this attribute.
-    """
-    return _min_or_max(environment, value, min, case_sensitive, attribute)
-
-
-@pass_environment
-def do_max(
-    environment: "Environment",
-    value: "t.Iterable[V]",
-    case_sensitive: bool = False,
-    attribute: t.Optional[t.Union[str, int]] = None,
-) -> "t.Union[V, Undefined]":
-    """Return the largest item from the sequence.
-
-    .. sourcecode:: jinja
-
-        {{ [1, 2, 3]|max }}
-            -> 3
-
-    :param case_sensitive: Treat upper and lower case strings as distinct.
-    :param attribute: Get the object with the max value of this attribute.
-    """
-    return _min_or_max(environment, value, max, case_sensitive, attribute)
-
-
-def do_default(
-    value: V,
-    default_value: V = "",  # type: ignore
-    boolean: bool = False,
-) -> V:
-    """If the value is undefined it will return the passed default value,
-    otherwise the value of the variable:
-
-    .. sourcecode:: jinja
-
-        {{ my_variable|default('my_variable is not defined') }}
-
-    This will output the value of ``my_variable`` if the variable was
-    defined, otherwise ``'my_variable is not defined'``. If you want
-    to use default with variables that evaluate to false you have to
-    set the second parameter to `true`:
-
-    .. sourcecode:: jinja
-
-        {{ ''|default('the string was empty', true) }}
-
-    .. versionchanged:: 2.11
-       It's now possible to configure the :class:`~jinja2.Environment` with
-       :class:`~jinja2.ChainableUndefined` to make the `default` filter work
-       on nested elements and attributes that may contain undefined values
-       in the chain without getting an :exc:`~jinja2.UndefinedError`.
-    """
-    if isinstance(value, Undefined) or (boolean and not value):
-        return default_value
-
-    return value
-
-
-@pass_eval_context
-def sync_do_join(
-    eval_ctx: "EvalContext",
-    value: t.Iterable[t.Any],
-    d: str = "",
-    attribute: t.Optional[t.Union[str, int]] = None,
-) -> str:
-    """Return a string which is the concatenation of the strings in the
-    sequence. The separator between elements is an empty string per
-    default, you can define it with the optional parameter:
-
-    .. sourcecode:: jinja
-
-        {{ [1, 2, 3]|join('|') }}
-            -> 1|2|3
-
-        {{ [1, 2, 3]|join }}
-            -> 123
-
-    It is also possible to join certain attributes of an object:
-
-    .. sourcecode:: jinja
-
-        {{ users|join(', ', attribute='username') }}
-
-    .. versionadded:: 2.6
-       The `attribute` parameter was added.
-    """
-    if attribute is not None:
-        value = map(make_attrgetter(eval_ctx.environment, attribute), value)
-
-    # no automatic escaping?  joining is a lot easier then
-    if not eval_ctx.autoescape:
-        return str(d).join(map(str, value))
-
-    # if the delimiter doesn't have an html representation we check
-    # if any of the items has.  If yes we do a coercion to Markup
-    if not hasattr(d, "__html__"):
-        value = list(value)
-        do_escape = False
-
-        for idx, item in enumerate(value):
-            if hasattr(item, "__html__"):
-                do_escape = True
-            else:
-                value[idx] = str(item)
-
-        if do_escape:
-            d = escape(d)
+    if fmax is None:
+        fmax = float(sr) / 2
+
+    # Initialize the weights
+    n_mels = int(n_mels)
+    weights = np.zeros((n_mels, int(1 + n_fft // 2)), dtype=dtype)
+
+    # Center freqs of each FFT bin
+    fftfreqs = fft_frequencies(sr=sr, n_fft=n_fft)
+
+    # 'Center freqs' of mel bands - uniformly spaced between limits
+    mel_f = mel_frequencies(n_mels + 2, fmin=fmin, fmax=fmax, htk=htk)
+
+    fdiff = np.diff(mel_f)
+    ramps = np.subtract.outer(mel_f, fftfreqs)
+
+    for i in range(n_mels):
+        # lower and upper slopes for all bins
+        lower = -ramps[i] / fdiff[i]
+        upper = ramps[i + 2] / fdiff[i + 1]
+
+        # .. then intersect them with each other and zero
+        weights[i] = np.maximum(0, np.minimum(lower, upper))
+
+    if isinstance(norm, str):
+        if norm == "slaney":
+            # Slaney-style mel is scaled to be approx constant energy per channel
+            enorm = 2.0 / (mel_f[2 : n_mels + 2] - mel_f[:n_mels])
+            weights *= enorm[:, np.newaxis]
         else:
-            d = str(d)
-
-        return d.join(value)
-
-    # no html involved, to normal joining
-    return soft_str(d).join(map(soft_str, value))
-
-
-@async_variant(sync_do_join)  # type: ignore
-async def do_join(
-    eval_ctx: "EvalContext",
-    value: t.Union[t.AsyncIterable[t.Any], t.Iterable[t.Any]],
-    d: str = "",
-    attribute: t.Optional[t.Union[str, int]] = None,
-) -> str:
-    return sync_do_join(eval_ctx, await auto_to_list(value), d, attribute)
-
-
-def do_center(value: str, width: int = 80) -> str:
-    """Centers the value in a field of a given width."""
-    return soft_str(value).center(width)
-
-
-@pass_environment
-def sync_do_first(
-    environment: "Environment", seq: "t.Iterable[V]"
-) -> "t.Union[V, Undefined]":
-    """Return the first item of a sequence."""
-    try:
-        return next(iter(seq))
-    except StopIteration:
-        return environment.undefined("No first item, sequence was empty.")
-
-
-@async_variant(sync_do_first)  # type: ignore
-async def do_first(
-    environment: "Environment", seq: "t.Union[t.AsyncIterable[V], t.Iterable[V]]"
-) -> "t.Union[V, Undefined]":
-    try:
-        return await auto_aiter(seq).__anext__()
-    except StopAsyncIteration:
-        return environment.undefined("No first item, sequence was empty.")
-
-
-@pass_environment
-def do_last(
-    environment: "Environment", seq: "t.Reversible[V]"
-) -> "t.Union[V, Undefined]":
-    """Return the last item of a sequence.
-
-    Note: Does not work with generators. You may want to explicitly
-    convert it to a list:
-
-    .. sourcecode:: jinja
-
-        {{ data | selectattr('name', '==', 'Jinja') | list | last }}
-    """
-    try:
-        return next(iter(reversed(seq)))
-    except StopIteration:
-        return environment.undefined("No last item, sequence was empty.")
-
-
-# No async do_last, it may not be safe in async mode.
-
-
-@pass_context
-def do_random(context: "Context", seq: "t.Sequence[V]") -> "t.Union[V, Undefined]":
-    """Return a random item from the sequence."""
-    try:
-        return random.choice(seq)
-    except IndexError:
-        return context.environment.undefined("No random item, sequence was empty.")
-
-
-def do_filesizeformat(value: t.Union[str, float, int], binary: bool = False) -> str:
-    """Format the value like a 'human-readable' file size (i.e. 13 kB,
-    4.1 MB, 102 Bytes, etc).  Per default decimal prefixes are used (Mega,
-    Giga, etc.), if the second parameter is set to `True` the binary
-    prefixes are used (Mebi, Gibi).
-    """
-    bytes = float(value)
-    base = 1024 if binary else 1000
-    prefixes = [
-        ("KiB" if binary else "kB"),
-        ("MiB" if binary else "MB"),
-        ("GiB" if binary else "GB"),
-        ("TiB" if binary else "TB"),
-        ("PiB" if binary else "PB"),
-        ("EiB" if binary else "EB"),
-        ("ZiB" if binary else "ZB"),
-        ("YiB" if binary else "YB"),
-    ]
-
-    if bytes == 1:
-        return "1 Byte"
-    elif bytes < base:
-        return f"{int(bytes)} Bytes"
+            raise ParameterError(f"Unsupported norm={norm}")
     else:
-        for i, prefix in enumerate(prefixes):
-            unit = base ** (i + 2)
-
-            if bytes < unit:
-                return f"{base * bytes / unit:.1f} {prefix}"
-
-        return f"{base * bytes / unit:.1f} {prefix}"
-
-
-def do_pprint(value: t.Any) -> str:
-    """Pretty print a variable. Useful for debugging."""
-    return pformat(value)
-
-
-_uri_scheme_re = re.compile(r"^([\w.+-]{2,}:(/){0,2})$")
-
-
-@pass_eval_context
-def do_urlize(
-    eval_ctx: "EvalContext",
-    value: str,
-    trim_url_limit: t.Optional[int] = None,
-    nofollow: bool = False,
-    target: t.Optional[str] = None,
-    rel: t.Optional[str] = None,
-    extra_schemes: t.Optional[t.Iterable[str]] = None,
-) -> str:
-    """Convert URLs in text into clickable links.
-
-    This may not recognize links in some situations. Usually, a more
-    comprehensive formatter, such as a Markdown library, is a better
-    choice.
-
-    Works on ``http://``, ``https://``, ``www.``, ``mailto:``, and email
-    addresses. Links with trailing punctuation (periods, commas, closing
-    parentheses) and leading punctuation (opening parentheses) are
-    recognized excluding the punctuation. Email addresses that include
-    header fields are not recognized (for example,
-    ``mailto:address@example.com?cc=copy@example.com``).
-
-    :param value: Original text containing URLs to link.
-    :param trim_url_limit: Shorten displayed URL values to this length.
-    :param nofollow: Add the ``rel=nofollow`` attribute to links.
-    :param target: Add the ``target`` attribute to links.
-    :param rel: Add the ``rel`` attribute to links.
-    :param extra_schemes: Recognize URLs that start with these schemes
-        in addition to the default behavior. Defaults to
-        ``env.policies["urlize.extra_schemes"]``, which defaults to no
-        extra schemes.
-
-    .. versionchanged:: 3.0
-        The ``extra_schemes`` parameter was added.
-
-    .. versionchanged:: 3.0
-        Generate ``https://`` links for URLs without a scheme.
-
-    .. versionchanged:: 3.0
-        The parsing rules were updated. Recognize email addresses with
-        or without the ``mailto:`` scheme. Validate IP addresses. Ignore
-        parentheses and brackets in more cases.
-
-    .. versionchanged:: 2.8
-       The ``target`` parameter was added.
-    """
-    policies = eval_ctx.environment.policies
-    rel_parts = set((rel or "").split())
-
-    if nofollow:
-        rel_parts.add("nofollow")
-
-    rel_parts.update((policies["urlize.rel"] or "").split())
-    rel = " ".join(sorted(rel_parts)) or None
-
-    if target is None:
-        target = policies["urlize.target"]
-
-    if extra_schemes is None:
-        extra_schemes = policies["urlize.extra_schemes"] or ()
-
-    for scheme in extra_schemes:
-        if _uri_scheme_re.fullmatch(scheme) is None:
-            raise FilterArgumentError(f"{scheme!r} is not a valid URI scheme prefix.")
-
-    rv = urlize(
-        value,
-        trim_url_limit=trim_url_limit,
-        rel=rel,
-        target=target,
-        extra_schemes=extra_schemes,
-    )
-
-    if eval_ctx.autoescape:
-        rv = Markup(rv)
-
-    return rv
-
-
-def do_indent(
-    s: str, width: t.Union[int, str] = 4, first: bool = False, blank: bool = False
-) -> str:
-    """Return a copy of the string with each line indented by 4 spaces. The
-    first line and blank lines are not indented by default.
-
-    :param width: Number of spaces, or a string, to indent by.
-    :param first: Don't skip indenting the first line.
-    :param blank: Don't skip indenting empty lines.
-
-    .. versionchanged:: 3.0
-        ``width`` can be a string.
-
-    .. versionchanged:: 2.10
-        Blank lines are not indented by default.
-
-        Rename the ``indentfirst`` argument to ``first``.
-    """
-    if isinstance(width, str):
-        indention = width
-    else:
-        indention = " " * width
-
-    newline = "\n"
-
-    if isinstance(s, Markup):
-        indention = Markup(indention)
-        newline = Markup(newline)
-
-    s += newline  # this quirk is necessary for splitlines method
-
-    if blank:
-        rv = (newline + indention).join(s.splitlines())
-    else:
-        lines = s.splitlines()
-        rv = lines.pop(0)
-
-        if lines:
-            rv += newline + newline.join(
-                indention + line if line else line for line in lines
-            )
-
-    if first:
-        rv = indention + rv
-
-    return rv
-
-
-@pass_environment
-def do_truncate(
-    env: "Environment",
-    s: str,
-    length: int = 255,
-    killwords: bool = False,
-    end: str = "...",
-    leeway: t.Optional[int] = None,
-) -> str:
-    """Return a truncated copy of the string. The length is specified
-    with the first parameter which defaults to ``255``. If the second
-    parameter is ``true`` the filter will cut the text at length. Otherwise
-    it will discard the last word. If the text was in fact
-    truncated it will append an ellipsis sign (``"..."``). If you want a
-    different ellipsis sign than ``"..."`` you can specify it using the
-    third parameter. Strings that only exceed the length by the tolerance
-    margin given in the fourth parameter will not be truncated.
-
-    .. sourcecode:: jinja
-
-        {{ "foo bar baz qux"|truncate(9) }}
-            -> "foo..."
-        {{ "foo bar baz qux"|truncate(9, True) }}
-            -> "foo ba..."
-        {{ "foo bar baz qux"|truncate(11) }}
-            -> "foo bar baz qux"
-        {{ "foo bar baz qux"|truncate(11, False, '...', 0) }}
-            -> "foo bar..."
-
-    The default leeway on newer Jinja versions is 5 and was 0 before but
-    can be reconfigured globally.
-    """
-    if leeway is None:
-        leeway = env.policies["truncate.leeway"]
-
-    assert length >= len(end), f"expected length >= {len(end)}, got {length}"
-    assert leeway >= 0, f"expected leeway >= 0, got {leeway}"
-
-    if len(s) <= length + leeway:
-        return s
-
-    if killwords:
-        return s[: length - len(end)] + end
-
-    result = s[: length - len(end)].rsplit(" ", 1)[0]
-    return result + end
-
-
-@pass_environment
-def do_wordwrap(
-    environment: "Environment",
-    s: str,
-    width: int = 79,
-    break_long_words: bool = True,
-    wrapstring: t.Optional[str] = None,
-    break_on_hyphens: bool = True,
-) -> str:
-    """Wrap a string to the given width. Existing newlines are treated
-    as paragraphs to be wrapped separately.
-
-    :param s: Original text to wrap.
-    :param width: Maximum length of wrapped lines.
-    :param break_long_words: If a word is longer than ``width``, break
-        it across lines.
-    :param break_on_hyphens: If a word contains hyphens, it may be split
-        across lines.
-    :param wrapstring: String to join each wrapped line. Defaults to
-        :attr:`Environment.newline_sequence`.
-
-    .. versionchanged:: 2.11
-        Existing newlines are treated as paragraphs wrapped separately.
-
-    .. versionchanged:: 2.11
-        Added the ``break_on_hyphens`` parameter.
-
-    .. versionchanged:: 2.7
-        Added the ``wrapstring`` parameter.
-    """
-    import textwrap
-
-    if wrapstring is None:
-        wrapstring = environment.newline_sequence
-
-    # textwrap.wrap doesn't consider existing newlines when wrapping.
-    # If the string has a newline before width, wrap will still insert
-    # a newline at width, resulting in a short line. Instead, split and
-    # wrap each paragraph individually.
-    return wrapstring.join(
-        [
-            wrapstring.join(
-                textwrap.wrap(
-                    line,
-                    width=width,
-                    expand_tabs=False,
-                    replace_whitespace=False,
-                    break_long_words=break_long_words,
-                    break_on_hyphens=break_on_hyphens,
-                )
-            )
-            for line in s.splitlines()
-        ]
-    )
-
-
-_word_re = re.compile(r"\w+")
-
-
-def do_wordcount(s: str) -> int:
-    """Count the words in that string."""
-    return len(_word_re.findall(soft_str(s)))
-
-
-def do_int(value: t.Any, default: int = 0, base: int = 10) -> int:
-    """Convert the value into an integer. If the
-    conversion doesn't work it will return ``0``. You can
-    override this default using the first parameter. You
-    can also override the default base (10) in the second
-    parameter, which handles input with prefixes such as
-    0b, 0o and 0x for bases 2, 8 and 16 respectively.
-    The base is ignored for decimal numbers and non-string values.
-    """
-    try:
-        if isinstance(value, str):
-            return int(value, base)
-
-        return int(value)
-    except (TypeError, ValueError):
-        # this quirk is necessary so that "42.23"|int gives 42.
-        try:
-            return int(float(value))
-        except (TypeError, ValueError, OverflowError):
-            return default
-
-
-def do_float(value: t.Any, default: float = 0.0) -> float:
-    """Convert the value into a floating point number. If the
-    conversion doesn't work it will return ``0.0``. You can
-    override this default using the first parameter.
-    """
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def do_format(value: str, *args: t.Any, **kwargs: t.Any) -> str:
-    """Apply the given values to a `printf-style`_ format string, like
-    ``string % values``.
-
-    .. sourcecode:: jinja
-
-        {{ "%s, %s!"|format(greeting, name) }}
-        Hello, World!
-
-    In most cases it should be more convenient and efficient to use the
-    ``%`` operator or :meth:`str.format`.
-
-    .. code-block:: text
-
-        {{ "%s, %s!" % (greeting, name) }}
-        {{ "{}, {}!".format(greeting, name) }}
-
-    .. _printf-style: https://docs.python.org/library/stdtypes.html
-        #printf-style-string-formatting
-    """
-    if args and kwargs:
-        raise FilterArgumentError(
-            "can't handle positional and keyword arguments at the same time"
+        weights = util.normalize(weights, norm=norm, axis=-1)
+
+    # Only check weights if f_mel[0] is positive
+    if not np.all((mel_f[:-2] == 0) | (weights.max(axis=1) > 0)):
+        # This means we have an empty channel somewhere
+        warnings.warn(
+            "Empty filters detected in mel frequency basis. "
+            "Some channels will produce empty responses. "
+            "Try increasing your sampling rate (and fmax) or "
+            "reducing n_mels.",
+            stacklevel=2,
         )
 
-    return soft_str(value) % (kwargs or args)
+    return weights
 
 
-def do_trim(value: str, chars: t.Optional[str] = None) -> str:
-    """Strip leading and trailing characters, by default whitespace."""
-    return soft_str(value).strip(chars)
-
-
-def do_striptags(value: "t.Union[str, HasHTML]") -> str:
-    """Strip SGML/XML tags and replace adjacent whitespace by one space."""
-    if hasattr(value, "__html__"):
-        value = t.cast("HasHTML", value).__html__()
-
-    return Markup(str(value)).striptags()
-
-
-def sync_do_slice(
-    value: "t.Collection[V]", slices: int, fill_with: "t.Optional[V]" = None
-) -> "t.Iterator[t.List[V]]":
-    """Slice an iterator and return a list of lists containing
-    those items. Useful if you want to create a div containing
-    three ul tags that represent columns:
-
-    .. sourcecode:: html+jinja
-
-        <div class="columnwrapper">
-          {%- for column in items|slice(3) %}
-            <ul class="column-{{ loop.index }}">
-            {%- for item in column %}
-              <li>{{ item }}</li>
-            {%- endfor %}
-            </ul>
-          {%- endfor %}
-        </div>
-
-    If you pass it a second argument it's used to fill missing
-    values on the last iteration.
-    """
-    seq = list(value)
-    length = len(seq)
-    items_per_slice = length // slices
-    slices_with_extra = length % slices
-    offset = 0
-
-    for slice_number in range(slices):
-        start = offset + slice_number * items_per_slice
-
-        if slice_number < slices_with_extra:
-            offset += 1
-
-        end = offset + (slice_number + 1) * items_per_slice
-        tmp = seq[start:end]
-
-        if fill_with is not None and slice_number >= slices_with_extra:
-            tmp.append(fill_with)
-
-        yield tmp
-
-
-@async_variant(sync_do_slice)  # type: ignore
-async def do_slice(
-    value: "t.Union[t.AsyncIterable[V], t.Iterable[V]]",
-    slices: int,
-    fill_with: t.Optional[t.Any] = None,
-) -> "t.Iterator[t.List[V]]":
-    return sync_do_slice(await auto_to_list(value), slices, fill_with)
-
-
-def do_batch(
-    value: "t.Iterable[V]", linecount: int, fill_with: "t.Optional[V]" = None
-) -> "t.Iterator[t.List[V]]":
-    """
-    A filter that batches items. It works pretty much like `slice`
-    just the other way round. It returns a list of lists with the
-    given number of items. If you provide a second parameter this
-    is used to fill up missing items. See this example:
-
-    .. sourcecode:: html+jinja
-
-        <table>
-        {%- for row in items|batch(3, '&nbsp;') %}
-          <tr>
-          {%- for column in row %}
-            <td>{{ column }}</td>
-          {%- endfor %}
-          </tr>
-        {%- endfor %}
-        </table>
-    """
-    tmp: t.List[V] = []
-
-    for item in value:
-        if len(tmp) == linecount:
-            yield tmp
-            tmp = []
-
-        tmp.append(item)
-
-    if tmp:
-        if fill_with is not None and len(tmp) < linecount:
-            tmp += [fill_with] * (linecount - len(tmp))
-
-        yield tmp
-
-
-def do_round(
-    value: float,
-    precision: int = 0,
-    method: 'te.Literal["common", "ceil", "floor"]' = "common",
-) -> float:
-    """Round the number to a given precision. The first
-    parameter specifies the precision (default is ``0``), the
-    second the rounding method:
-
-    - ``'common'`` rounds either up or down
-    - ``'ceil'`` always rounds up
-    - ``'floor'`` always rounds down
-
-    If you don't specify a method ``'common'`` is used.
-
-    .. sourcecode:: jinja
-
-        {{ 42.55|round }}
-            -> 43.0
-        {{ 42.55|round(1, 'floor') }}
-            -> 42.5
-
-    Note that even if rounded to 0 precision, a float is returned.  If
-    you need a real integer, pipe it through `int`:
-
-    .. sourcecode:: jinja
-
-        {{ 42.55|round|int }}
-            -> 43
-    """
-    if method not in {"common", "ceil", "floor"}:
-        raise FilterArgumentError("method must be common, ceil or floor")
-
-    if method == "common":
-        return round(value, precision)
-
-    func = getattr(math, method)
-    return t.cast(float, func(value * (10**precision)) / (10**precision))
-
-
-class _GroupTuple(t.NamedTuple):
-    grouper: t.Any
-    list: t.List[t.Any]
-
-    # Use the regular tuple repr to hide this subclass if users print
-    # out the value during debugging.
-    def __repr__(self) -> str:
-        return tuple.__repr__(self)
-
-    def __str__(self) -> str:
-        return tuple.__str__(self)
-
-
-@pass_environment
-def sync_do_groupby(
-    environment: "Environment",
-    value: "t.Iterable[V]",
-    attribute: t.Union[str, int],
-    default: t.Optional[t.Any] = None,
-    case_sensitive: bool = False,
-) -> "t.List[_GroupTuple]":
-    """Group a sequence of objects by an attribute using Python's
-    :func:`itertools.groupby`. The attribute can use dot notation for
-    nested access, like ``"address.city"``. Unlike Python's ``groupby``,
-    the values are sorted first so only one group is returned for each
-    unique value.
-
-    For example, a list of ``User`` objects with a ``city`` attribute
-    can be rendered in groups. In this example, ``grouper`` refers to
-    the ``city`` value of the group.
-
-    .. sourcecode:: html+jinja
-
-        <ul>{% for city, items in users|groupby("city") %}
-          <li>{{ city }}
-            <ul>{% for user in items %}
-              <li>{{ user.name }}
-            {% endfor %}</ul>
-          </li>
-        {% endfor %}</ul>
-
-    ``groupby`` yields namedtuples of ``(grouper, list)``, which
-    can be used instead of the tuple unpacking above. ``grouper`` is the
-    value of the attribute, and ``list`` is the items with that value.
-
-    .. sourcecode:: html+jinja
-
-        <ul>{% for group in users|groupby("city") %}
-          <li>{{ group.grouper }}: {{ group.list|join(", ") }}
-        {% endfor %}</ul>
-
-    You can specify a ``default`` value to use if an object in the list
-    does not have the given attribute.
-
-    .. sourcecode:: jinja
-
-        <ul>{% for city, items in users|groupby("city", default="NY") %}
-          <li>{{ city }}: {{ items|map(attribute="name")|join(", ") }}</li>
-        {% endfor %}</ul>
-
-    Like the :func:`~jinja-filters.sort` filter, sorting and grouping is
-    case-insensitive by default. The ``key`` for each group will have
-    the case of the first item in that group of values. For example, if
-    a list of users has cities ``["CA", "NY", "ca"]``, the "CA" group
-    will have two values. This can be disabled by passing
-    ``case_sensitive=True``.
-
-    .. versionchanged:: 3.1
-        Added the ``case_sensitive`` parameter. Sorting and grouping is
-        case-insensitive by default, matching other filters that do
-        comparisons.
-
-    .. versionchanged:: 3.0
-        Added the ``default`` parameter.
-
-    .. versionchanged:: 2.6
-        The attribute supports dot notation for nested access.
-    """
-    expr = make_attrgetter(
-        environment,
-        attribute,
-        postprocess=ignore_case if not case_sensitive else None,
-        default=default,
-    )
-    out = [
-        _GroupTuple(key, list(values))
-        for key, values in groupby(sorted(value, key=expr), expr)
-    ]
-
-    if not case_sensitive:
-        # Return the real key from the first value instead of the lowercase key.
-        output_expr = make_attrgetter(environment, attribute, default=default)
-        out = [_GroupTuple(output_expr(values[0]), values) for _, values in out]
-
-    return out
-
-
-@async_variant(sync_do_groupby)  # type: ignore
-async def do_groupby(
-    environment: "Environment",
-    value: "t.Union[t.AsyncIterable[V], t.Iterable[V]]",
-    attribute: t.Union[str, int],
-    default: t.Optional[t.Any] = None,
-    case_sensitive: bool = False,
-) -> "t.List[_GroupTuple]":
-    expr = make_attrgetter(
-        environment,
-        attribute,
-        postprocess=ignore_case if not case_sensitive else None,
-        default=default,
-    )
-    out = [
-        _GroupTuple(key, await auto_to_list(values))
-        for key, values in groupby(sorted(await auto_to_list(value), key=expr), expr)
-    ]
-
-    if not case_sensitive:
-        # Return the real key from the first value instead of the lowercase key.
-        output_expr = make_attrgetter(environment, attribute, default=default)
-        out = [_GroupTuple(output_expr(values[0]), values) for _, values in out]
-
-    return out
-
-
-@pass_environment
-def sync_do_sum(
-    environment: "Environment",
-    iterable: "t.Iterable[V]",
-    attribute: t.Optional[t.Union[str, int]] = None,
-    start: V = 0,  # type: ignore
-) -> V:
-    """Returns the sum of a sequence of numbers plus the value of parameter
-    'start' (which defaults to 0).  When the sequence is empty it returns
-    start.
-
-    It is also possible to sum up only certain attributes:
-
-    .. sourcecode:: jinja
-
-        Total: {{ items|sum(attribute='price') }}
-
-    .. versionchanged:: 2.6
-       The ``attribute`` parameter was added to allow summing up over
-       attributes.  Also the ``start`` parameter was moved on to the right.
-    """
-    if attribute is not None:
-        iterable = map(make_attrgetter(environment, attribute), iterable)
-
-    return sum(iterable, start)  # type: ignore[no-any-return, call-overload]
-
-
-@async_variant(sync_do_sum)  # type: ignore
-async def do_sum(
-    environment: "Environment",
-    iterable: "t.Union[t.AsyncIterable[V], t.Iterable[V]]",
-    attribute: t.Optional[t.Union[str, int]] = None,
-    start: V = 0,  # type: ignore
-) -> V:
-    rv = start
-
-    if attribute is not None:
-        func = make_attrgetter(environment, attribute)
-    else:
-
-        def func(x: V) -> V:
-            return x
-
-    async for item in auto_aiter(iterable):
-        rv += func(item)
-
-    return rv
-
-
-def sync_do_list(value: "t.Iterable[V]") -> "t.List[V]":
-    """Convert the value into a list.  If it was a string the returned list
-    will be a list of characters.
-    """
-    return list(value)
-
-
-@async_variant(sync_do_list)  # type: ignore
-async def do_list(value: "t.Union[t.AsyncIterable[V], t.Iterable[V]]") -> "t.List[V]":
-    return await auto_to_list(value)
-
-
-def do_mark_safe(value: str) -> Markup:
-    """Mark the value as safe which means that in an environment with automatic
-    escaping enabled this variable will not be escaped.
-    """
-    return Markup(value)
-
-
-def do_mark_unsafe(value: str) -> str:
-    """Mark a value as unsafe.  This is the reverse operation for :func:`safe`."""
-    return str(value)
-
-
-@typing.overload
-def do_reverse(value: str) -> str: ...
-
-
-@typing.overload
-def do_reverse(value: "t.Iterable[V]") -> "t.Iterable[V]": ...
-
-
-def do_reverse(value: t.Union[str, t.Iterable[V]]) -> t.Union[str, t.Iterable[V]]:
-    """Reverse the object or return an iterator that iterates over it the other
-    way round.
-    """
-    if isinstance(value, str):
-        return value[::-1]
-
-    try:
-        return reversed(value)  # type: ignore
-    except TypeError:
-        try:
-            rv = list(value)
-            rv.reverse()
-            return rv
-        except TypeError as e:
-            raise FilterArgumentError("argument must be iterable") from e
-
-
-@pass_environment
-def do_attr(
-    environment: "Environment", obj: t.Any, name: str
-) -> t.Union[Undefined, t.Any]:
-    """Get an attribute of an object. ``foo|attr("bar")`` works like
-    ``foo.bar``, but returns undefined instead of falling back to ``foo["bar"]``
-    if the attribute doesn't exist.
-
-    See :ref:`Notes on subscriptions <notes-on-subscriptions>` for more details.
-    """
-    # Environment.getattr will fall back to obj[name] if obj.name doesn't exist.
-    # But we want to call env.getattr to get behavior such as sandboxing.
-    # Determine if the attr exists first, so we know the fallback won't trigger.
-    try:
-        # This avoids executing properties/descriptors, but misses __getattr__
-        # and __getattribute__ dynamic attrs.
-        getattr_static(obj, name)
-    except AttributeError:
-        # This finds dynamic attrs, and we know it's not a descriptor at this point.
-        if not hasattr(obj, name):
-            return environment.undefined(obj=obj, name=name)
-
-    return environment.getattr(obj, name)
-
-
-@typing.overload
-def sync_do_map(
-    context: "Context",
-    value: t.Iterable[t.Any],
-    name: str,
-    *args: t.Any,
-    **kwargs: t.Any,
-) -> t.Iterable[t.Any]: ...
-
-
-@typing.overload
-def sync_do_map(
-    context: "Context",
-    value: t.Iterable[t.Any],
+@cache(level=10)
+def chroma(
     *,
-    attribute: str = ...,
-    default: t.Optional[t.Any] = None,
-) -> t.Iterable[t.Any]: ...
+    sr: float,
+    n_fft: int,
+    n_chroma: int = 12,
+    tuning: float = 0.0,
+    ctroct: float = 5.0,
+    octwidth: Union[float, None] = 2,
+    norm: Optional[float] = 2,
+    base_c: bool = True,
+    dtype: DTypeLike = np.float32,
+) -> np.ndarray:
+    """Create a chroma filter bank.
 
+    This creates a linear transformation matrix to project
+    FFT bins onto chroma bins (i.e. pitch classes).
 
-@pass_context
-def sync_do_map(
-    context: "Context", value: t.Iterable[t.Any], *args: t.Any, **kwargs: t.Any
-) -> t.Iterable[t.Any]:
-    """Applies a filter on a sequence of objects or looks up an attribute.
-    This is useful when dealing with lists of objects but you are really
-    only interested in a certain value of it.
+    Parameters
+    ----------
+    sr : number > 0 [scalar]
+        audio sampling rate
 
-    The basic usage is mapping on an attribute.  Imagine you have a list
-    of users but you are only interested in a list of usernames:
+    n_fft : int > 0 [scalar]
+        number of FFT bins
 
-    .. sourcecode:: jinja
+    n_chroma : int > 0 [scalar]
+        number of chroma bins
 
-        Users on this page: {{ users|map(attribute='username')|join(', ') }}
+    tuning : float
+        Tuning deviation from A440 in fractions of a chroma bin.
 
-    You can specify a ``default`` value to use if an object in the list
-    does not have the given attribute.
+    ctroct : float > 0 [scalar]
 
-    .. sourcecode:: jinja
+    octwidth : float > 0 or None [scalar]
+        ``ctroct`` and ``octwidth`` specify a dominance window:
+        a Gaussian weighting centered on ``ctroct`` (in octs, A0 = 27.5Hz)
+        and with a gaussian half-width of ``octwidth``.
 
-        {{ users|map(attribute="username", default="Anonymous")|join(", ") }}
+        Set ``octwidth`` to `None` to use a flat weighting.
 
-    Alternatively you can let it invoke a filter by passing the name of the
-    filter and the arguments afterwards.  A good example would be applying a
-    text conversion filter on a sequence:
+    norm : float > 0 or np.inf
+        Normalization factor for each filter
 
-    .. sourcecode:: jinja
+    base_c : bool
+        If True, the filter bank will start at 'C'.
+        If False, the filter bank will start at 'A'.
 
-        Users on this page: {{ titles|map('lower')|join(', ') }}
+    dtype : np.dtype
+        The data type of the output basis.
+        By default, uses 32-bit (single-precision) floating point.
 
-    Similar to a generator comprehension such as:
+    Returns
+    -------
+    wts : ndarray [shape=(n_chroma, 1 + n_fft / 2)]
+        Chroma filter matrix
 
-    .. code-block:: python
+    See Also
+    --------
+    librosa.util.normalize
+    librosa.feature.chroma_stft
 
-        (u.username for u in users)
-        (getattr(u, "username", "Anonymous") for u in users)
-        (do_lower(x) for x in titles)
+    Notes
+    -----
+    This function caches at level 10.
 
-    .. versionchanged:: 2.11.0
-        Added the ``default`` parameter.
+    Examples
+    --------
+    Build a simple chroma filter bank
 
-    .. versionadded:: 2.7
+    >>> chromafb = librosa.filters.chroma(sr=22050, n_fft=4096)
+    array([[  1.689e-05,   3.024e-04, ...,   4.639e-17,   5.327e-17],
+           [  1.716e-05,   2.652e-04, ...,   2.674e-25,   3.176e-25],
+    ...,
+           [  1.578e-05,   3.619e-04, ...,   8.577e-06,   9.205e-06],
+           [  1.643e-05,   3.355e-04, ...,   1.474e-10,   1.636e-10]])
+
+    Use quarter-tones instead of semitones
+
+    >>> librosa.filters.chroma(sr=22050, n_fft=4096, n_chroma=24)
+    array([[  1.194e-05,   2.138e-04, ...,   6.297e-64,   1.115e-63],
+           [  1.206e-05,   2.009e-04, ...,   1.546e-79,   2.929e-79],
+    ...,
+           [  1.162e-05,   2.372e-04, ...,   6.417e-38,   9.923e-38],
+           [  1.180e-05,   2.260e-04, ...,   4.697e-50,   7.772e-50]])
+
+    Equally weight all octaves
+
+    >>> librosa.filters.chroma(sr=22050, n_fft=4096, octwidth=None)
+    array([[  3.036e-01,   2.604e-01, ...,   2.445e-16,   2.809e-16],
+           [  3.084e-01,   2.283e-01, ...,   1.409e-24,   1.675e-24],
+    ...,
+           [  2.836e-01,   3.116e-01, ...,   4.520e-05,   4.854e-05],
+           [  2.953e-01,   2.888e-01, ...,   7.768e-10,   8.629e-10]])
+
+    >>> import matplotlib.pyplot as plt
+    >>> fig, ax = plt.subplots()
+    >>> img = librosa.display.specshow(chromafb, x_axis='linear', ax=ax)
+    >>> ax.set(ylabel='Chroma filter', title='Chroma filter bank')
+    >>> fig.colorbar(img, ax=ax)
     """
-    if value:
-        func = prepare_map(context, args, kwargs)
+    wts = np.zeros((n_chroma, n_fft))
 
-        for item in value:
-            yield func(item)
+    # Get the FFT bins, not counting the DC component
+    frequencies = np.linspace(0, sr, n_fft, endpoint=False)[1:]
+
+    frqbins = n_chroma * hz_to_octs(
+        frequencies, tuning=tuning, bins_per_octave=n_chroma
+    )
+
+    # make up a value for the 0 Hz bin = 1.5 octaves below bin 1
+    # (so chroma is 50% rotated from bin 1, and bin width is broad)
+    frqbins = np.concatenate(([frqbins[0] - 1.5 * n_chroma], frqbins))
+
+    binwidthbins = np.concatenate((np.maximum(frqbins[1:] - frqbins[:-1], 1.0), [1]))
+
+    D = np.subtract.outer(frqbins, np.arange(0, n_chroma, dtype="d")).T
+
+    n_chroma2 = np.round(float(n_chroma) / 2)
+
+    # Project into range -n_chroma/2 .. n_chroma/2
+    # add on fixed offset of 10*n_chroma to ensure all values passed to
+    # rem are positive
+    D = np.remainder(D + n_chroma2 + 10 * n_chroma, n_chroma) - n_chroma2
+
+    # Gaussian bumps - 2*D to make them narrower
+    wts = np.exp(-0.5 * (2 * D / np.tile(binwidthbins, (n_chroma, 1))) ** 2)
+
+    # normalize each column
+    wts = util.normalize(wts, norm=norm, axis=0)
+
+    # Maybe apply scaling for fft bins
+    if octwidth is not None:
+        wts *= np.tile(
+            np.exp(-0.5 * (((frqbins / n_chroma - ctroct) / octwidth) ** 2)),
+            (n_chroma, 1),
+        )
+
+    if base_c:
+        wts = np.roll(wts, -3 * (n_chroma // 12), axis=0)
+
+    # remove aliasing columns, copy to ensure row-contiguity
+    return np.ascontiguousarray(wts[:, : int(1 + n_fft / 2)], dtype=dtype)
 
 
-@typing.overload
-def do_map(
-    context: "Context",
-    value: t.Union[t.AsyncIterable[t.Any], t.Iterable[t.Any]],
-    name: str,
-    *args: t.Any,
-    **kwargs: t.Any,
-) -> t.Iterable[t.Any]: ...
+def __float_window(window_spec):
+    """Decorate a window function to support fractional input lengths.
+
+    This function guarantees that for fractional ``x``, the following hold:
+
+    1. ``__float_window(window_function)(x)`` has length ``np.ceil(x)``
+    2. all values from ``np.floor(x)`` are set to 0.
+
+    For integer-valued ``x``, there should be no change in behavior.
+    """
+    def _wrap(n, *args, **kwargs):
+        """Wrap the window"""
+        n_min, n_max = int(np.floor(n)), int(np.ceil(n))
+
+        window = get_window(window_spec, n_min)
+
+        if len(window) < n_max:
+            window = np.pad(window, [(0, n_max - len(window))], mode="constant")
+
+        window[n_min:] = 0.0
+
+        return window
+
+    return _wrap
 
 
-@typing.overload
-def do_map(
-    context: "Context",
-    value: t.Union[t.AsyncIterable[t.Any], t.Iterable[t.Any]],
+@deprecated(version="0.9.0", version_removed="1.0")
+def constant_q(
     *,
-    attribute: str = ...,
-    default: t.Optional[t.Any] = None,
-) -> t.Iterable[t.Any]: ...
+    sr: float,
+    fmin: Optional[_FloatLike_co] = None,
+    n_bins: int = 84,
+    bins_per_octave: int = 12,
+    window: _WindowSpec = "hann",
+    filter_scale: float = 1,
+    pad_fft: bool = True,
+    norm: Optional[float] = 1,
+    dtype: DTypeLike = np.complex64,
+    gamma: float = 0,
+    **kwargs: Any,
+) -> Tuple[np.ndarray, np.ndarray]:
+    r"""Construct a constant-Q basis.
 
+    This function constructs a filter bank similar to Morlet wavelets,
+    where complex exponentials are windowed to different lengths
+    such that the number of cycles remains fixed for all frequencies.
 
-@async_variant(sync_do_map)  # type: ignore
-async def do_map(
-    context: "Context",
-    value: t.Union[t.AsyncIterable[t.Any], t.Iterable[t.Any]],
-    *args: t.Any,
-    **kwargs: t.Any,
-) -> t.AsyncIterable[t.Any]:
-    if value:
-        func = prepare_map(context, args, kwargs)
+    By default, a Hann window (rather than the Gaussian window of Morlet wavelets)
+    is used, but this can be controlled by the ``window`` parameter.
 
-        async for item in auto_aiter(value):
-            yield await auto_await(func(item))
+    Frequencies are spaced geometrically, increasing by a factor of
+    ``(2**(1./bins_per_octave))`` at each successive band.
 
+    .. warning:: This function is deprecated as of v0.9 and will be removed in 1.0.
+        See `librosa.filters.wavelet`.
 
-@pass_context
-def sync_do_select(
-    context: "Context", value: "t.Iterable[V]", *args: t.Any, **kwargs: t.Any
-) -> "t.Iterator[V]":
-    """Filters a sequence of objects by applying a test to each object,
-    and only selecting the objects with the test succeeding.
+    Parameters
+    ----------
+    sr : number > 0 [scalar]
+        Audio sampling rate
 
-    If no test is specified, each object will be evaluated as a boolean.
+    fmin : float > 0 [scalar]
+        Minimum frequency bin. Defaults to `C1 ~= 32.70`
 
-    Example usage:
+    n_bins : int > 0 [scalar]
+        Number of frequencies.  Defaults to 7 octaves (84 bins).
 
-    .. sourcecode:: jinja
+    bins_per_octave : int > 0 [scalar]
+        Number of bins per octave
 
-        {{ numbers|select("odd") }}
-        {{ numbers|select("odd") }}
-        {{ numbers|select("divisibleby", 3) }}
-        {{ numbers|select("lessthan", 42) }}
-        {{ strings|select("equalto", "mystring") }}
+    window : string, tuple, number, or function
+        Windowing function to apply to filters.
 
-    Similar to a generator comprehension such as:
+    filter_scale : float > 0 [scalar]
+        Scale of filter windows.
+        Small values (<1) use shorter windows for higher temporal resolution.
 
-    .. code-block:: python
+    pad_fft : boolean
+        Center-pad all filters up to the nearest integral power of 2.
 
-        (n for n in numbers if test_odd(n))
-        (n for n in numbers if test_divisibleby(n, 3))
+        By default, padding is done with zeros, but this can be overridden
+        by setting the ``mode=`` field in *kwargs*.
 
-    .. versionadded:: 2.7
+    norm : {inf, -inf, 0, float > 0}
+        Type of norm to use for basis function normalization.
+        See librosa.util.normalize
+
+    gamma : number >= 0
+        Bandwidth offset for variable-Q transforms.
+        ``gamma=0`` produces a constant-Q filterbank.
+
+    dtype : np.dtype
+        The data type of the output basis.
+        By default, uses 64-bit (single precision) complex floating point.
+
+    **kwargs : additional keyword arguments
+        Arguments to `np.pad()` when ``pad==True``.
+
+    Returns
+    -------
+    filters : np.ndarray, ``len(filters) == n_bins``
+        ``filters[i]`` is ``i``\ th time-domain CQT basis filter
+    lengths : np.ndarray, ``len(lengths) == n_bins``
+        The (fractional) length of each filter
+
+    Notes
+    -----
+    This function caches at level 10.
+
+    See Also
+    --------
+    wavelet
+    constant_q_lengths
+    librosa.cqt
+    librosa.vqt
+    librosa.util.normalize
+
+    Examples
+    --------
+    Use a shorter window for each filter
+
+    >>> basis, lengths = librosa.filters.constant_q(sr=22050, filter_scale=0.5)
+
+    Plot one octave of filters in time and frequency
+
+    >>> import matplotlib.pyplot as plt
+    >>> basis, lengths = librosa.filters.constant_q(sr=22050)
+    >>> fig, ax = plt.subplots(nrows=2, figsize=(10, 6))
+    >>> notes = librosa.midi_to_note(np.arange(24, 24 + len(basis)))
+    >>> for i, (f, n) in enumerate(zip(basis, notes[:12])):
+    ...     f_scale = librosa.util.normalize(f) / 2
+    ...     ax[0].plot(i + f_scale.real)
+    ...     ax[0].plot(i + f_scale.imag, linestyle=':')
+    >>> ax[0].set(yticks=np.arange(len(notes[:12])), yticklabels=notes[:12],
+    ...           ylabel='CQ filters',
+    ...           title='CQ filters (one octave, time domain)',
+    ...           xlabel='Time (samples at 22050 Hz)')
+    >>> ax[0].legend(['Real', 'Imaginary'])
+    >>> F = np.abs(np.fft.fftn(basis, axes=[-1]))
+    >>> # Keep only the positive frequencies
+    >>> F = F[:, :(1 + F.shape[1] // 2)]
+    >>> librosa.display.specshow(F, x_axis='linear', y_axis='cqt_note', ax=ax[1])
+    >>> ax[1].set(ylabel='CQ filters', title='CQ filter magnitudes (frequency domain)')
     """
-    return select_or_reject(context, value, args, kwargs, lambda x: x, False)
+    if fmin is None:
+        fmin = note_to_hz("C1")
 
+    # Pass-through parameters to get the filter lengths
+    lengths = constant_q_lengths(
+        sr=sr,
+        fmin=fmin,
+        n_bins=n_bins,
+        bins_per_octave=bins_per_octave,
+        window=window,
+        filter_scale=filter_scale,
+        gamma=gamma,
+    )
 
-@async_variant(sync_do_select)  # type: ignore
-async def do_select(
-    context: "Context",
-    value: "t.Union[t.AsyncIterable[V], t.Iterable[V]]",
-    *args: t.Any,
-    **kwargs: t.Any,
-) -> "t.AsyncIterator[V]":
-    return async_select_or_reject(context, value, args, kwargs, lambda x: x, False)
+    freqs = fmin * (2.0 ** (np.arange(n_bins, dtype=float) / bins_per_octave))
 
+    # Build the filters
+    filters = []
+    for ilen, freq in zip(lengths, freqs):
+        # Build the filter: note, length will be ceil(ilen)
+        sig = util.phasor(
+            np.arange(-ilen // 2, ilen // 2, dtype=float) * 2 * np.pi * freq / sr
+        )
 
-@pass_context
-def sync_do_reject(
-    context: "Context", value: "t.Iterable[V]", *args: t.Any, **kwargs: t.Any
-) -> "t.Iterator[V]":
-    """Filters a sequence of objects by applying a test to each object,
-    and rejecting the objects with the test succeeding.
+        # Apply the windowing function
+        sig = sig * __float_window(window)(len(sig))
 
-    If no test is specified, each object will be evaluated as a boolean.
+        # Normalize
+        sig = util.normalize(sig, norm=norm)
 
-    Example usage:
+        filters.append(sig)
 
-    .. sourcecode:: jinja
-
-        {{ numbers|reject("odd") }}
-
-    Similar to a generator comprehension such as:
-
-    .. code-block:: python
-
-        (n for n in numbers if not test_odd(n))
-
-    .. versionadded:: 2.7
-    """
-    return select_or_reject(context, value, args, kwargs, lambda x: not x, False)
-
-
-@async_variant(sync_do_reject)  # type: ignore
-async def do_reject(
-    context: "Context",
-    value: "t.Union[t.AsyncIterable[V], t.Iterable[V]]",
-    *args: t.Any,
-    **kwargs: t.Any,
-) -> "t.AsyncIterator[V]":
-    return async_select_or_reject(context, value, args, kwargs, lambda x: not x, False)
-
-
-@pass_context
-def sync_do_selectattr(
-    context: "Context", value: "t.Iterable[V]", *args: t.Any, **kwargs: t.Any
-) -> "t.Iterator[V]":
-    """Filters a sequence of objects by applying a test to the specified
-    attribute of each object, and only selecting the objects with the
-    test succeeding.
-
-    If no test is specified, the attribute's value will be evaluated as
-    a boolean.
-
-    Example usage:
-
-    .. sourcecode:: jinja
-
-        {{ users|selectattr("is_active") }}
-        {{ users|selectattr("email", "none") }}
-
-    Similar to a generator comprehension such as:
-
-    .. code-block:: python
-
-        (user for user in users if user.is_active)
-        (user for user in users if test_none(user.email))
-
-    .. versionadded:: 2.7
-    """
-    return select_or_reject(context, value, args, kwargs, lambda x: x, True)
-
-
-@async_variant(sync_do_selectattr)  # type: ignore
-async def do_selectattr(
-    context: "Context",
-    value: "t.Union[t.AsyncIterable[V], t.Iterable[V]]",
-    *args: t.Any,
-    **kwargs: t.Any,
-) -> "t.AsyncIterator[V]":
-    return async_select_or_reject(context, value, args, kwargs, lambda x: x, True)
-
-
-@pass_context
-def sync_do_rejectattr(
-    context: "Context", value: "t.Iterable[V]", *args: t.Any, **kwargs: t.Any
-) -> "t.Iterator[V]":
-    """Filters a sequence of objects by applying a test to the specified
-    attribute of each object, and rejecting the objects with the test
-    succeeding.
-
-    If no test is specified, the attribute's value will be evaluated as
-    a boolean.
-
-    .. sourcecode:: jinja
-
-        {{ users|rejectattr("is_active") }}
-        {{ users|rejectattr("email", "none") }}
-
-    Similar to a generator comprehension such as:
-
-    .. code-block:: python
-
-        (user for user in users if not user.is_active)
-        (user for user in users if not test_none(user.email))
-
-    .. versionadded:: 2.7
-    """
-    return select_or_reject(context, value, args, kwargs, lambda x: not x, True)
-
-
-@async_variant(sync_do_rejectattr)  # type: ignore
-async def do_rejectattr(
-    context: "Context",
-    value: "t.Union[t.AsyncIterable[V], t.Iterable[V]]",
-    *args: t.Any,
-    **kwargs: t.Any,
-) -> "t.AsyncIterator[V]":
-    return async_select_or_reject(context, value, args, kwargs, lambda x: not x, True)
-
-
-@pass_eval_context
-def do_tojson(
-    eval_ctx: "EvalContext", value: t.Any, indent: t.Optional[int] = None
-) -> Markup:
-    """Serialize an object to a string of JSON, and mark it safe to
-    render in HTML. This filter is only for use in HTML documents.
-
-    The returned string is safe to render in HTML documents and
-    ``<script>`` tags. The exception is in HTML attributes that are
-    double quoted; either use single quotes or the ``|forceescape``
-    filter.
-
-    :param value: The object to serialize to JSON.
-    :param indent: The ``indent`` parameter passed to ``dumps``, for
-        pretty-printing the value.
-
-    .. versionadded:: 2.9
-    """
-    policies = eval_ctx.environment.policies
-    dumps = policies["json.dumps_function"]
-    kwargs = policies["json.dumps_kwargs"]
-
-    if indent is not None:
-        kwargs = kwargs.copy()
-        kwargs["indent"] = indent
-
-    return htmlsafe_json_dumps(value, dumps=dumps, **kwargs)
-
-
-def prepare_map(
-    context: "Context", args: t.Tuple[t.Any, ...], kwargs: t.Dict[str, t.Any]
-) -> t.Callable[[t.Any], t.Any]:
-    if not args and "attribute" in kwargs:
-        attribute = kwargs.pop("attribute")
-        default = kwargs.pop("default", None)
-
-        if kwargs:
-            raise FilterArgumentError(
-                f"Unexpected keyword argument {next(iter(kwargs))!r}"
-            )
-
-        func = make_attrgetter(context.environment, attribute, default=default)
+    # Pad and stack
+    max_len = max(lengths)
+    if pad_fft:
+        max_len = int(2.0 ** (np.ceil(np.log2(max_len))))
     else:
-        try:
-            name = args[0]
-            args = args[1:]
-        except LookupError:
-            raise FilterArgumentError("map requires a filter argument") from None
+        max_len = int(np.ceil(max_len))
 
-        def func(item: t.Any) -> t.Any:
-            return context.environment.call_filter(
-                name, item, args, kwargs, context=context
-            )
+    filters = np.asarray(
+        [util.pad_center(filt, size=max_len, **kwargs) for filt in filters], dtype=dtype
+    )
 
-    return func
+    return filters, np.asarray(lengths)
 
 
-def prepare_select_or_reject(
-    context: "Context",
-    args: t.Tuple[t.Any, ...],
-    kwargs: t.Dict[str, t.Any],
-    modfunc: t.Callable[[t.Any], t.Any],
-    lookup_attr: bool,
-) -> t.Callable[[t.Any], t.Any]:
-    if lookup_attr:
-        try:
-            attr = args[0]
-        except LookupError:
-            raise FilterArgumentError("Missing parameter for attribute name") from None
+@deprecated(version="0.9.0", version_removed="1.0")
+@cache(level=10)
+def constant_q_lengths(
+    *,
+    sr: float,
+    fmin: _FloatLike_co,
+    n_bins: int = 84,
+    bins_per_octave: int = 12,
+    window: _WindowSpec = "hann",
+    filter_scale: float = 1,
+    gamma: float = 0,
+) -> np.ndarray:
+    r"""Return length of each filter in a constant-Q basis.
 
-        transfunc = make_attrgetter(context.environment, attr)
-        off = 1
+    .. warning:: This function is deprecated as of v0.9 and will be removed in 1.0.
+        See `librosa.filters.wavelet_lengths`.
+
+    Parameters
+    ----------
+    sr : number > 0 [scalar]
+        Audio sampling rate
+    fmin : float > 0 [scalar]
+        Minimum frequency bin.
+    n_bins : int > 0 [scalar]
+        Number of frequencies.  Defaults to 7 octaves (84 bins).
+    bins_per_octave : int > 0 [scalar]
+        Number of bins per octave
+    window : str or callable
+        Window function to use on filters
+    filter_scale : float > 0 [scalar]
+        Resolution of filter windows. Larger values use longer windows.
+    gamma : number >= 0
+        Bandwidth offset for variable-Q transforms.
+        ``gamma=0`` produces a constant-Q filterbank.
+
+    Returns
+    -------
+    lengths : np.ndarray
+        The length of each filter.
+
+    Notes
+    -----
+    This function caches at level 10.
+
+    See Also
+    --------
+    wavelet_lengths
+    """
+    if fmin <= 0:
+        raise ParameterError("fmin must be strictly positive")
+
+    if bins_per_octave <= 0:
+        raise ParameterError("bins_per_octave must be positive")
+
+    if filter_scale <= 0:
+        raise ParameterError("filter_scale must be positive")
+
+    if n_bins <= 0 or not isinstance(n_bins, (int, np.integer)):
+        raise ParameterError("n_bins must be a positive integer")
+
+    # Compute the frequencies
+    freq = fmin * (2.0 ** (np.arange(n_bins, dtype=float) / bins_per_octave))
+
+    # Q should be capitalized here, so we suppress the name warning
+    # pylint: disable=invalid-name
+    #
+    # Balance filter bandwidths
+    alpha = (2.0 ** (2 / bins_per_octave) - 1) / (2.0 ** (2 / bins_per_octave) + 1)
+    Q = float(filter_scale) / alpha
+
+    if max(freq * (1 + 0.5 * window_bandwidth(window) / Q)) > sr / 2.0:
+        raise ParameterError(
+            f"Maximum filter frequency={max(freq):.2f} would exceed Nyquist={sr/2}"
+        )
+
+    # Convert frequencies to filter lengths
+    lengths: np.ndarray = Q * sr / (freq + gamma / alpha)
+
+    return lengths
+
+
+@cache(level=10)
+def wavelet_lengths(
+    *,
+    freqs: ArrayLike,
+    sr: float = 22050,
+    window: _WindowSpec = "hann",
+    filter_scale: float = 1,
+    gamma: Optional[float] = 0,
+    alpha: Optional[Union[float, np.ndarray]] = None,
+) -> Tuple[np.ndarray, float]:
+    """Return length of each filter in a wavelet basis.
+
+    Parameters
+    ----------
+    freqs : np.ndarray (positive)
+        Center frequencies of the filters (in Hz).
+        Must be in ascending order.
+
+    sr : number > 0 [scalar]
+        Audio sampling rate
+
+    window : str or callable
+        Window function to use on filters
+
+    filter_scale : float > 0 [scalar]
+        Resolution of filter windows. Larger values use longer windows.
+
+    gamma : number >= 0 [scalar, optional]
+        Bandwidth offset for determining filter lengths, as used in
+        Variable-Q transforms.
+
+        Bandwidth for the k'th filter is determined by::
+
+            B[k] = alpha[k] * freqs[k] + gamma
+
+        ``alpha[k]`` is twice the relative difference between ``freqs[k+1]`` and ``freqs[k-1]``::
+
+            alpha[k] = (freqs[k+1]-freqs[k-1]) / (freqs[k+1]+freqs[k-1])
+
+        If ``freqs`` follows a geometric progression (as in CQT and VQT), the vector
+        ``alpha`` is constant and such that::
+
+            (1 + alpha) * freqs[k-1] = (1 - alpha) * freqs[k+1]
+
+        Furthermore, if ``gamma=0`` (default), ``alpha`` is such that even-``k`` and
+        odd-``k`` filters are interleaved::
+
+            freqs[k-1] + B[k-1] = freqs[k+1] - B[k+1]
+
+        If ``gamma=None`` is specified, then ``gamma`` is computed such
+        that each filter has bandwidth proportional to the equivalent
+        rectangular bandwidth (ERB) at frequency ``freqs[k]``::
+
+            gamma[k] = 24.7 * alpha[k] / 0.108
+
+        as derived by [#]_.
+
+        .. [#] Glasberg, Brian R., and Brian CJ Moore.
+            "Derivation of auditory filter shapes from notched-noise data."
+            Hearing research 47.1-2 (1990): 103-138.
+
+    alpha : number > 0 [optional]
+        Optional pre-computed relative bandwidth parameter.
+        Note that this must be provided if ``len(freqs)==1`` because bandwidth cannot be
+        inferred from a single frequency.
+        Otherwise, if left unspecified, it will be automatically derived by the rules
+        specified above.
+
+    Returns
+    -------
+    lengths : np.ndarray
+        The length of each filter.
+    f_cutoff : float
+        The lowest frequency at which all filters' main lobes have decayed by
+        at least 3dB.
+
+        This second output serves in cqt and vqt to ensure that all wavelet
+        bands remain below the Nyquist frequency.
+
+    Notes
+    -----
+    This function caches at level 10.
+
+    Raises
+    ------
+    ParameterError
+        - If ``filter_scale`` is not strictly positive
+
+        - If ``gamma`` is a negative number
+
+        - If any frequencies are <= 0
+
+        - If the frequency array is not sorted in ascending order
+    """
+    freqs = np.asarray(freqs)
+    if filter_scale <= 0:
+        raise ParameterError(f"filter_scale={filter_scale} must be positive")
+
+    if gamma is not None and gamma < 0:
+        raise ParameterError(f"gamma={gamma} must be non-negative")
+
+    if np.any(freqs <= 0):
+        raise ParameterError("frequencies must be strictly positive")
+
+    if len(freqs) > 1 and np.any(freqs[:-1] > freqs[1:]):
+        raise ParameterError(
+            f"Frequency array={freqs} must be in strictly ascending order"
+        )
+
+    if alpha is None:
+        alpha = _relative_bandwidth(freqs=freqs)
     else:
-        off = 0
+        alpha = np.asarray(alpha)
 
-        def transfunc(x: V) -> V:
-            return x
+    gamma_: Union[_FloatLike_co, np.ndarray]
+    if gamma is None:
+        gamma_ = alpha * 24.7 / 0.108
+    else:
+        gamma_ = gamma
+    # Q should be capitalized here, so we suppress the name warning
+    # pylint: disable=invalid-name
+    Q = float(filter_scale) / alpha
 
-    try:
-        name = args[off]
-        args = args[1 + off :]
+    # How far up does our highest frequency reach?
+    f_cutoff = max(freqs * (1 + 0.5 * window_bandwidth(window) / Q) + 0.5 * gamma_)
 
-        def func(item: t.Any) -> t.Any:
-            return context.environment.call_test(name, item, args, kwargs, context)
+    # Convert frequencies to filter lengths
+    lengths = Q * sr / (freqs + gamma_ / alpha)
 
-    except LookupError:
-        func = bool  # type: ignore
-
-    return lambda item: modfunc(func(transfunc(item)))
-
-
-def select_or_reject(
-    context: "Context",
-    value: "t.Iterable[V]",
-    args: t.Tuple[t.Any, ...],
-    kwargs: t.Dict[str, t.Any],
-    modfunc: t.Callable[[t.Any], t.Any],
-    lookup_attr: bool,
-) -> "t.Iterator[V]":
-    if value:
-        func = prepare_select_or_reject(context, args, kwargs, modfunc, lookup_attr)
-
-        for item in value:
-            if func(item):
-                yield item
+    return lengths, f_cutoff
 
 
-async def async_select_or_reject(
-    context: "Context",
-    value: "t.Union[t.AsyncIterable[V], t.Iterable[V]]",
-    args: t.Tuple[t.Any, ...],
-    kwargs: t.Dict[str, t.Any],
-    modfunc: t.Callable[[t.Any], t.Any],
-    lookup_attr: bool,
-) -> "t.AsyncIterator[V]":
-    if value:
-        func = prepare_select_or_reject(context, args, kwargs, modfunc, lookup_attr)
+def _relative_bandwidth(*, freqs: np.ndarray) -> np.ndarray:
+    """Compute the relative bandwidth for each of a set of specified frequencies.
 
-        async for item in auto_aiter(value):
-            if func(item):
-                yield item
+    This function is used as a helper in wavelet basis construction.
+
+    Parameters
+    ----------
+    freqs : np.ndarray
+        The array of frequencies
+
+    Returns
+    -------
+    alpha : np.ndarray
+        Relative bandwidth
+    """
+    if len(freqs) <= 1:
+        raise ParameterError(f"2 or more frequencies are required to compute bandwidths. Given freqs={freqs}")
+
+    # Approximate the local octave resolution around each frequency
+    bpo = np.empty_like(freqs)
+    logf = np.log2(freqs)
+    # Reflect at the lowest and highest frequencies
+    bpo[0] = 1 / (logf[1] - logf[0])
+    bpo[-1] = 1 / (logf[-1] - logf[-2])
+
+    # For everything else, do a centered difference
+    bpo[1:-1] = 2 / (logf[2:] - logf[:-2])
+
+    # Compute relative bandwidths
+    alpha = (2.0 ** (2 / bpo) - 1) / (2.0 ** (2 / bpo) + 1)
+    return alpha
 
 
-FILTERS = {
-    "abs": abs,
-    "attr": do_attr,
-    "batch": do_batch,
-    "capitalize": do_capitalize,
-    "center": do_center,
-    "count": len,
-    "d": do_default,
-    "default": do_default,
-    "dictsort": do_dictsort,
-    "e": escape,
-    "escape": escape,
-    "filesizeformat": do_filesizeformat,
-    "first": do_first,
-    "float": do_float,
-    "forceescape": do_forceescape,
-    "format": do_format,
-    "groupby": do_groupby,
-    "indent": do_indent,
-    "int": do_int,
-    "join": do_join,
-    "last": do_last,
-    "length": len,
-    "list": do_list,
-    "lower": do_lower,
-    "items": do_items,
-    "map": do_map,
-    "min": do_min,
-    "max": do_max,
-    "pprint": do_pprint,
-    "random": do_random,
-    "reject": do_reject,
-    "rejectattr": do_rejectattr,
-    "replace": do_replace,
-    "reverse": do_reverse,
-    "round": do_round,
-    "safe": do_mark_safe,
-    "select": do_select,
-    "selectattr": do_selectattr,
-    "slice": do_slice,
-    "sort": do_sort,
-    "string": soft_str,
-    "striptags": do_striptags,
-    "sum": do_sum,
-    "title": do_title,
-    "trim": do_trim,
-    "truncate": do_truncate,
-    "unique": do_unique,
-    "upper": do_upper,
-    "urlencode": do_urlencode,
-    "urlize": do_urlize,
-    "wordcount": do_wordcount,
-    "wordwrap": do_wordwrap,
-    "xmlattr": do_xmlattr,
-    "tojson": do_tojson,
-}
+@cache(level=10)
+def wavelet(
+    *,
+    freqs: np.ndarray,
+    sr: float = 22050,
+    window: _WindowSpec = "hann",
+    filter_scale: float = 1,
+    pad_fft: bool = True,
+    norm: Optional[float] = 1,
+    dtype: DTypeLike = np.complex64,
+    gamma: float = 0,
+    alpha: Optional[float] = None,
+    **kwargs: Any,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Construct a wavelet basis using windowed complex sinusoids.
+
+    This function constructs a wavelet filterbank at a specified set of center
+    frequencies.
+
+    Parameters
+    ----------
+    freqs : np.ndarray (positive)
+        Center frequencies of the filters (in Hz).
+        Must be in ascending order.
+
+    sr : number > 0 [scalar]
+        Audio sampling rate
+
+    window : string, tuple, number, or function
+        Windowing function to apply to filters.
+
+    filter_scale : float > 0 [scalar]
+        Scale of filter windows.
+        Small values (<1) use shorter windows for higher temporal resolution.
+
+    pad_fft : boolean
+        Center-pad all filters up to the nearest integral power of 2.
+
+        By default, padding is done with zeros, but this can be overridden
+        by setting the ``mode=`` field in *kwargs*.
+
+    norm : {inf, -inf, 0, float > 0}
+        Type of norm to use for basis function normalization.
+        See librosa.util.normalize
+
+    gamma : number >= 0
+        Bandwidth offset for variable-Q transforms.
+
+    dtype : np.dtype
+        The data type of the output basis.
+        By default, uses 64-bit (single precision) complex floating point.
+
+    alpha : number > 0 [optional]
+        Optional pre-computed relative bandwidth parameter.
+        Note that this must be provided if ``len(freqs)==1`` because bandwidth cannot be
+        inferred from a single frequency.
+        Otherwise, if left unspecified, it will be automatically derived by the rules
+        specified above.
+
+    **kwargs : additional keyword arguments
+        Arguments to `np.pad()` when ``pad==True``.
+
+    Returns
+    -------
+    filters : np.ndarray, ``len(filters) == n_bins``
+        each ``filters[i]`` is a (complex) time-domain filter
+    lengths : np.ndarray, ``len(lengths) == n_bins``
+        The (fractional) length of each filter in samples
+
+    Notes
+    -----
+    This function caches at level 10.
+
+    See Also
+    --------
+    wavelet_lengths
+    librosa.cqt
+    librosa.vqt
+    librosa.util.normalize
+
+    Examples
+    --------
+    Create a constant-Q basis
+
+    >>> freqs = librosa.cqt_frequencies(n_bins=84, fmin=librosa.note_to_hz('C1'))
+    >>> basis, lengths = librosa.filters.wavelet(freqs=freqs, sr=22050)
+
+    Plot one octave of filters in time and frequency
+
+    >>> import matplotlib.pyplot as plt
+    >>> basis, lengths = librosa.filters.wavelet(freqs=freqs, sr=22050)
+    >>> fig, ax = plt.subplots(nrows=2, figsize=(10, 6))
+    >>> notes = librosa.midi_to_note(np.arange(24, 24 + len(basis)))
+    >>> for i, (f, n) in enumerate(zip(basis, notes[:12])):
+    ...     f_scale = librosa.util.normalize(f) / 2
+    ...     ax[0].plot(i + f_scale.real)
+    ...     ax[0].plot(i + f_scale.imag, linestyle=':')
+    >>> ax[0].set(yticks=np.arange(len(notes[:12])), yticklabels=notes[:12],
+    ...           ylabel='CQ filters',
+    ...           title='CQ filters (one octave, time domain)',
+    ...           xlabel='Time (samples at 22050 Hz)')
+    >>> ax[0].legend(['Real', 'Imaginary'])
+    >>> F = np.abs(np.fft.fftn(basis, axes=[-1]))
+    >>> # Keep only the positive frequencies
+    >>> F = F[:, :(1 + F.shape[1] // 2)]
+    >>> librosa.display.specshow(F, x_axis='linear', y_axis='cqt_note', ax=ax[1])
+    >>> ax[1].set(ylabel='CQ filters', title='CQ filter magnitudes (frequency domain)')
+    """
+    # Pass-through parameters to get the filter lengths
+    lengths, _ = wavelet_lengths(
+        freqs=freqs,
+        sr=sr,
+        window=window,
+        filter_scale=filter_scale,
+        gamma=gamma,
+        alpha=alpha,
+    )
+
+    # Build the filters
+    filters = []
+    for ilen, freq in zip(lengths, freqs):
+        # Build the filter: note, length will be ceil(ilen)
+        sig = util.phasor(
+            np.arange(-ilen // 2, ilen // 2, dtype=float) * 2 * np.pi * freq / sr
+        )
+
+        # Apply the windowing function
+        sig *= __float_window(window)(len(sig))
+
+        # Normalize
+        sig = util.normalize(sig, norm=norm)
+
+        filters.append(sig)
+
+    # Pad and stack
+    max_len = max(lengths)
+    if pad_fft:
+        max_len = int(2.0 ** (np.ceil(np.log2(max_len))))
+    else:
+        max_len = int(np.ceil(max_len))
+
+    filters = np.asarray(
+        [util.pad_center(filt, size=max_len, **kwargs) for filt in filters], dtype=dtype
+    )
+
+    return filters, lengths
+
+
+@cache(level=10)
+def cq_to_chroma(
+    n_input: int,
+    *,
+    bins_per_octave: int = 12,
+    n_chroma: int = 12,
+    fmin: Optional[_FloatLike_co] = None,
+    window: Optional[np.ndarray] = None,
+    base_c: bool = True,
+    dtype: DTypeLike = np.float32,
+) -> np.ndarray:
+    """Construct a linear transformation matrix to map Constant-Q bins
+    onto chroma bins (i.e., pitch classes).
+
+    Parameters
+    ----------
+    n_input : int > 0 [scalar]
+        Number of input components (CQT bins)
+    bins_per_octave : int > 0 [scalar]
+        How many bins per octave in the CQT
+    n_chroma : int > 0 [scalar]
+        Number of output bins (per octave) in the chroma
+    fmin : None or float > 0
+        Center frequency of the first constant-Q channel.
+        Default: 'C1' ~= 32.7 Hz
+    window : None or np.ndarray
+        If provided, the cq_to_chroma filter bank will be
+        convolved with ``window``.
+    base_c : bool
+        If True, the first chroma bin will start at 'C'
+        If False, the first chroma bin will start at 'A'
+    dtype : np.dtype
+        The data type of the output basis.
+        By default, uses 32-bit (single-precision) floating point.
+
+    Returns
+    -------
+    cq_to_chroma : np.ndarray [shape=(n_chroma, n_input)]
+        Transformation matrix: ``Chroma = np.dot(cq_to_chroma, CQT)``
+
+    Raises
+    ------
+    ParameterError
+        If ``n_input`` is not an integer multiple of ``n_chroma``
+
+    Notes
+    -----
+    This function caches at level 10.
+
+    Examples
+    --------
+    Get a CQT, and wrap bins to chroma
+
+    >>> y, sr = librosa.load(librosa.ex('trumpet'))
+    >>> CQT = np.abs(librosa.cqt(y, sr=sr))
+    >>> chroma_map = librosa.filters.cq_to_chroma(CQT.shape[0])
+    >>> chromagram = chroma_map.dot(CQT)
+    >>> # Max-normalize each time step
+    >>> chromagram = librosa.util.normalize(chromagram, axis=0)
+
+    >>> import matplotlib.pyplot as plt
+    >>> fig, ax = plt.subplots(nrows=3, sharex=True)
+    >>> imgcq = librosa.display.specshow(librosa.amplitude_to_db(CQT,
+    ...                                                         ref=np.max),
+    ...                                  y_axis='cqt_note', x_axis='time',
+    ...                                  ax=ax[0])
+    >>> ax[0].set(title='CQT Power')
+    >>> ax[0].label_outer()
+    >>> librosa.display.specshow(chromagram, y_axis='chroma', x_axis='time',
+    ...                          ax=ax[1])
+    >>> ax[1].set(title='Chroma (wrapped CQT)')
+    >>> ax[1].label_outer()
+    >>> chroma = librosa.feature.chroma_stft(y=y, sr=sr)
+    >>> imgchroma = librosa.display.specshow(chroma, y_axis='chroma', x_axis='time', ax=ax[2])
+    >>> ax[2].set(title='librosa.feature.chroma_stft')
+    """
+    # How many fractional bins are we merging?
+    n_merge = float(bins_per_octave) / n_chroma
+
+    fmin_: _FloatLike_co
+    if fmin is None:
+        fmin_ = note_to_hz("C1")
+    else:
+        fmin_ = fmin
+
+    if np.mod(n_merge, 1) != 0:
+        raise ParameterError(
+            "Incompatible CQ merge: "
+            "input bins must be an "
+            "integer multiple of output bins."
+        )
+
+    # Tile the identity to merge fractional bins
+    cq_to_ch = np.repeat(np.eye(n_chroma), int(n_merge), axis=1)
+
+    # Roll it left to center on the target bin
+    cq_to_ch = np.roll(cq_to_ch, -int(n_merge // 2), axis=1)
+
+    # How many octaves are we repeating?
+    n_octaves = np.ceil(float(n_input) / bins_per_octave)
+
+    # Repeat and trim
+    cq_to_ch = np.tile(cq_to_ch, int(n_octaves))[:, :n_input]
+
+    # What's the note number of the first bin in the CQT?
+    # midi uses 12 bins per octave here
+    midi_0 = np.mod(hz_to_midi(fmin_), 12)
+
+    if base_c:
+        # rotate to C
+        roll = midi_0
+    else:
+        # rotate to A
+        roll = midi_0 - 9
+
+    # Adjust the roll in terms of how many chroma we want out
+    # We need to be careful with rounding here
+    roll = int(np.round(roll * (n_chroma / 12.0)))
+
+    # Apply the roll
+    cq_to_ch = np.roll(cq_to_ch, roll, axis=0).astype(dtype)
+
+    if window is not None:
+        cq_to_ch = scipy.signal.convolve(cq_to_ch, np.atleast_2d(window), mode="same")
+
+    return cq_to_ch
+
+
+@cache(level=10)
+def window_bandwidth(window: _WindowSpec, n: int = 1000) -> float:
+    """Get the equivalent noise bandwidth (ENBW) of a window function.
+
+    The ENBW of a window is defined by [#]_ (equation 11) as the normalized
+    ratio of the sum of squares to the square of sums::
+
+        enbw = n * sum(window**2) / sum(window)**2
+
+    .. [#] Harris, F. J.
+        "On the use of windows for harmonic analysis with the discrete Fourier transform."
+        Proceedings of the IEEE, 66(1), 51-83.  1978.
+
+    Parameters
+    ----------
+    window : callable or string
+        A window function, or the name of a window function,
+        e.g.: `scipy.signal.hann` or `'boxcar'`
+    n : int > 0
+        The number of coefficients to use in estimating the
+        window bandwidth
+
+    Returns
+    -------
+    bandwidth : float
+        The equivalent noise bandwidth (in FFT bins) of the
+        given window function
+
+    Notes
+    -----
+    This function caches at level 10.
+
+    See Also
+    --------
+    get_window
+    """
+    if hasattr(window, "__name__"):
+        key = window.__name__
+    else:
+        key = window
+
+    if key not in WINDOW_BANDWIDTHS:
+        win = get_window(window, n)
+        WINDOW_BANDWIDTHS[key] = (
+            n * np.sum(win**2) / (np.sum(win) ** 2 + util.tiny(win))
+        )
+
+    return WINDOW_BANDWIDTHS[key]
+
+
+@cache(level=10)
+def get_window(
+    window: _WindowSpec,
+    Nx: int,
+    *,
+    fftbins: Optional[bool] = True,
+) -> np.ndarray:
+    """Compute a window function.
+
+    This is a wrapper for `scipy.signal.get_window` that additionally
+    supports callable or pre-computed windows.
+
+    Parameters
+    ----------
+    window : string, tuple, number, callable, or list-like
+        The window specification:
+
+        - If string, it's the name of the window function (e.g., `'hann'`)
+        - If tuple, it's the name of the window function and any parameters
+          (e.g., `('kaiser', 4.0)`)
+        - If numeric, it is treated as the beta parameter of the `'kaiser'`
+          window, as in `scipy.signal.get_window`.
+        - If callable, it's a function that accepts one integer argument
+          (the window length)
+        - If list-like, it's a pre-computed window of the correct length `Nx`
+
+    Nx : int > 0
+        The length of the window
+
+    fftbins : bool, optional
+        If True (default), create a periodic window for use with FFT
+        If False, create a symmetric window for filter design applications.
+
+    Returns
+    -------
+    get_window : np.ndarray
+        A window of length `Nx` and type `window`
+
+    See Also
+    --------
+    scipy.signal.get_window
+
+    Notes
+    -----
+    This function caches at level 10.
+
+    Raises
+    ------
+    ParameterError
+        If `window` is supplied as a vector of length != `n_fft`,
+        or is otherwise mis-specified.
+    """
+    if callable(window):
+        return window(Nx)
+
+    elif isinstance(window, (str, tuple)) or np.isscalar(window):
+        # TODO: if we add custom window functions in librosa, call them here
+
+        win: np.ndarray = scipy.signal.get_window(window, Nx, fftbins=fftbins)
+        return win
+
+    elif isinstance(window, (np.ndarray, list)):
+        if len(window) == Nx:
+            return np.asarray(window)
+
+        raise ParameterError(f"Window size mismatch: {len(window):d} != {Nx:d}")
+    else:
+        raise ParameterError(f"Invalid window specification: {window!r}")
+
+
+@cache(level=10)
+def _multirate_fb(
+    center_freqs: Optional[np.ndarray] = None,
+    sample_rates: Optional[np.ndarray] = None,
+    Q: float = 25.0,
+    passband_ripple: float = 1,
+    stopband_attenuation: float = 50,
+    ftype: str = "ellip",
+    flayout: str = "sos",
+) -> Tuple[List[Any], np.ndarray]:
+    r"""Construct a multirate filterbank.
+
+     A filter bank consists of multiple band-pass filters which divide the input signal
+     into subbands. In the case of a multirate filter bank, the band-pass filters
+     operate with resampled versions of the input signal, e.g. to keep the length
+     of a filter constant while shifting its center frequency.
+
+     This implementation uses `scipy.signal.iirdesign` to design the filters.
+
+    Parameters
+    ----------
+    center_freqs : np.ndarray [shape=(n,), dtype=float]
+        Center frequencies of the filter kernels.
+        Also defines the number of filters in the filterbank.
+
+    sample_rates : np.ndarray [shape=(n,), dtype=float]
+        Samplerate for each filter (used for multirate filterbank).
+
+    Q : float
+        Q factor (influences the filter bandwidth).
+
+    passband_ripple : float
+        The maximum loss in the passband (dB)
+        See `scipy.signal.iirdesign` for details.
+
+    stopband_attenuation : float
+        The minimum attenuation in the stopband (dB)
+        See `scipy.signal.iirdesign` for details.
+
+    ftype : str
+        The type of IIR filter to design
+        See `scipy.signal.iirdesign` for details.
+
+    flayout : string
+        Valid `output` argument for `scipy.signal.iirdesign`.
+
+        - If `ba`, returns numerators/denominators of the transfer functions,
+          used for filtering with `scipy.signal.filtfilt`.
+          Can be unstable for high-order filters.
+
+        - If `sos`, returns a series of second-order filters,
+          used for filtering with `scipy.signal.sosfiltfilt`.
+          Minimizes numerical precision errors for high-order filters, but is slower.
+
+        - If `zpk`, returns zeros, poles, and system gains of the transfer functions.
+
+    Returns
+    -------
+    filterbank : list [shape=(n,), dtype=float]
+        Each list entry comprises the filter coefficients for a single filter.
+    sample_rates : np.ndarray [shape=(n,), dtype=float]
+        Samplerate for each filter.
+
+    Notes
+    -----
+    This function caches at level 10.
+
+    See Also
+    --------
+    scipy.signal.iirdesign
+
+    Raises
+    ------
+    ParameterError
+        If ``center_freqs`` is ``None``.
+        If ``sample_rates`` is ``None``.
+        If ``center_freqs.shape`` does not match ``sample_rates.shape``.
+    """
+    if center_freqs is None:
+        raise ParameterError("center_freqs must be provided.")
+
+    if sample_rates is None:
+        raise ParameterError("sample_rates must be provided.")
+
+    if center_freqs.shape != sample_rates.shape:
+        raise ParameterError(
+            "Number of provided center_freqs and sample_rates must be equal."
+        )
+
+    nyquist = 0.5 * sample_rates
+    filter_bandwidths = center_freqs / float(Q)
+
+    filterbank = []
+
+    for cur_center_freq, cur_nyquist, cur_bw in zip(
+        center_freqs, nyquist, filter_bandwidths
+    ):
+        passband_freqs = [
+            cur_center_freq - 0.5 * cur_bw,
+            cur_center_freq + 0.5 * cur_bw,
+        ] / cur_nyquist
+        stopband_freqs = [
+            cur_center_freq - cur_bw,
+            cur_center_freq + cur_bw,
+        ] / cur_nyquist
+
+        cur_filter = scipy.signal.iirdesign(
+            passband_freqs,
+            stopband_freqs,
+            passband_ripple,
+            stopband_attenuation,
+            analog=False,
+            ftype=ftype,
+            output=flayout,
+        )
+
+        filterbank.append(cur_filter)
+
+    return filterbank, sample_rates
+
+
+@cache(level=10)
+def mr_frequencies(tuning: float) -> Tuple[np.ndarray, np.ndarray]:
+    r"""Generate center frequencies and sample rate pairs.
+
+    This function will return center frequency and corresponding sample rates
+    to obtain similar pitch filterbank settings as described in [#]_.
+    Instead of starting with MIDI pitch `A0`, we start with `C0`.
+
+    .. [#] Müller, Meinard.
+           "Information Retrieval for Music and Motion."
+           Springer Verlag. 2007.
+
+    Parameters
+    ----------
+    tuning : float [scalar]
+        Tuning deviation from A440, measure as a fraction of the equally
+        tempered semitone (1/12 of an octave).
+
+    Returns
+    -------
+    center_freqs : np.ndarray [shape=(n,), dtype=float]
+        Center frequencies of the filter kernels.
+        Also defines the number of filters in the filterbank.
+    sample_rates : np.ndarray [shape=(n,), dtype=float]
+        Sample rate for each filter, used for multirate filterbank.
+
+    Notes
+    -----
+    This function caches at level 10.
+
+    See Also
+    --------
+    librosa.filters.semitone_filterbank
+    """
+    center_freqs = midi_to_hz(np.arange(24 + tuning, 109 + tuning))
+
+    sample_rates = np.asarray(
+        len(np.arange(0, 36))
+        * [
+            882.0,
+        ]
+        + len(np.arange(36, 70))
+        * [
+            4410.0,
+        ]
+        + len(np.arange(70, 85))
+        * [
+            22050.0,
+        ]
+    )
+
+    return center_freqs, sample_rates
+
+
+def semitone_filterbank(
+    *,
+    center_freqs: Optional[np.ndarray] = None,
+    tuning: float = 0.0,
+    sample_rates: Optional[np.ndarray] = None,
+    flayout: str = "ba",
+    **kwargs: Any,
+) -> Tuple[List[Any], np.ndarray]:
+    r"""Construct a multi-rate bank of infinite-impulse response (IIR)
+    band-pass filters at user-defined center frequencies and sample rates.
+
+    By default, these center frequencies are set equal to the 88 fundamental
+    frequencies of the grand piano keyboard, according to a pitch tuning standard
+    of A440, that is, note A above middle C set to 440 Hz. The center frequencies
+    are tuned to the twelve-tone equal temperament, which means that they grow
+    exponentially at a rate of 2**(1/12), that is, twelve notes per octave.
+
+    The A440 tuning can be changed by the user while keeping twelve-tone equal
+    temperament. While A440 is currently the international standard in the music
+    industry (ISO 16), some orchestras tune to A441-A445, whereas baroque musicians
+    tune to A415.
+
+    See [#]_ for details.
+
+    .. [#] Müller, Meinard.
+           "Information Retrieval for Music and Motion."
+           Springer Verlag. 2007.
+
+    Parameters
+    ----------
+    center_freqs : np.ndarray [shape=(n,), dtype=float]
+        Center frequencies of the filter kernels.
+        Also defines the number of filters in the filterbank.
+    tuning : float [scalar]
+        Tuning deviation from A440 as a fraction of a semitone (1/12 of an octave
+        in equal temperament).
+    sample_rates : np.ndarray [shape=(n,), dtype=float]
+        Sample rates of each filter in the multirate filterbank.
+    flayout : string
+        - If `ba`, the standard difference equation is used for filtering with `scipy.signal.filtfilt`.
+          Can be unstable for high-order filters.
+        - If `sos`, a series of second-order filters is used for filtering with `scipy.signal.sosfiltfilt`.
+          Minimizes numerical precision errors for high-order filters, but is slower.
+    **kwargs : additional keyword arguments
+        Additional arguments to the private function `_multirate_fb()`.
+
+    Returns
+    -------
+    filterbank : list [shape=(n,), dtype=float]
+        Each list entry contains the filter coefficients for a single filter.
+    fb_sample_rates : np.ndarray [shape=(n,), dtype=float]
+        Sample rate for each filter.
+
+    See Also
+    --------
+    librosa.cqt
+    librosa.iirt
+    librosa.filters.mr_frequencies
+    scipy.signal.iirdesign
+
+    Examples
+    --------
+    >>> import matplotlib.pyplot as plt
+    >>> import numpy as np
+    >>> import scipy.signal
+    >>> semitone_filterbank, sample_rates = librosa.filters.semitone_filterbank(
+    ...     center_freqs=librosa.midi_to_hz(np.arange(60, 72)),
+    ...     sample_rates=np.repeat(4410.0, 12),
+    ...     flayout='sos'
+    ...     )
+    >>> magnitudes = []
+    >>> for cur_sr, cur_filter in zip(sample_rates, semitone_filterbank):
+    ...     w, h = scipy.signal.sosfreqz(cur_filter,fs=cur_sr, worN=1025)
+    ...     magnitudes.append(20 * np.log10(np.abs(h)))
+    >>> fig, ax = plt.subplots(figsize=(12,6))
+    >>> img = librosa.display.specshow(
+    ...     np.array(magnitudes),
+    ...     x_axis="hz",
+    ...     sr=4410,
+    ...     y_coords=librosa.midi_to_hz(np.arange(60, 72)),
+    ...     vmin=-60,
+    ...     vmax=3,
+    ...     ax=ax
+    ...     )
+    >>> fig.colorbar(img, ax=ax, format="%+2.f dB", label="Magnitude (dB)")
+    >>> ax.set(
+    ...     xlim=[200, 600],
+    ...     yticks=librosa.midi_to_hz(np.arange(60, 72)),
+    ...     title='Magnitude Responses of the Pitch Filterbank',
+    ...     xlabel='Frequency (Hz)',
+    ...     ylabel='Semitone filter center frequency (Hz)'
+    ... )
+    """
+    if (center_freqs is None) and (sample_rates is None):
+        center_freqs, sample_rates = mr_frequencies(tuning)
+
+    filterbank, fb_sample_rates = _multirate_fb(
+        center_freqs=center_freqs, sample_rates=sample_rates, flayout=flayout, **kwargs
+    )
+
+    return filterbank, fb_sample_rates
+
+
+@jit(nopython=True, cache=True)
+def __window_ss_fill(x, win_sq, n_frames, hop_length):  # pragma: no cover
+    """Compute the sum-square envelope of a window."""
+    n = len(x)
+    n_fft = len(win_sq)
+    for i in range(n_frames):
+        sample = i * hop_length
+        x[sample : min(n, sample + n_fft)] += win_sq[: max(0, min(n_fft, n - sample))]
+
+
+def window_sumsquare(
+    *,
+    window: _WindowSpec,
+    n_frames: int,
+    hop_length: int = 512,
+    win_length: Optional[int] = None,
+    n_fft: int = 2048,
+    dtype: DTypeLike = np.float32,
+    norm: Optional[float] = None,
+) -> np.ndarray:
+    """Compute the sum-square envelope of a window function at a given hop length.
+
+    This is used to estimate modulation effects induced by windowing observations
+    in short-time Fourier transforms.
+
+    Parameters
+    ----------
+    window : string, tuple, number, callable, or list-like
+        Window specification, as in `get_window`
+    n_frames : int > 0
+        The number of analysis frames
+    hop_length : int > 0
+        The number of samples to advance between frames
+    win_length : [optional]
+        The length of the window function.  By default, this matches ``n_fft``.
+    n_fft : int > 0
+        The length of each analysis frame.
+    dtype : np.dtype
+        The data type of the output
+    norm : {np.inf, -np.inf, 0, float > 0, None}
+        Normalization mode used in window construction.
+        Note that this does not affect the squaring operation.
+
+    Returns
+    -------
+    wss : np.ndarray, shape=``(n_fft + hop_length * (n_frames - 1))``
+        The sum-squared envelope of the window function
+
+    Examples
+    --------
+    For a fixed frame length (2048), compare modulation effects for a Hann window
+    at different hop lengths:
+
+    >>> n_frames = 50
+    >>> wss_256 = librosa.filters.window_sumsquare(window='hann', n_frames=n_frames, hop_length=256)
+    >>> wss_512 = librosa.filters.window_sumsquare(window='hann', n_frames=n_frames, hop_length=512)
+    >>> wss_1024 = librosa.filters.window_sumsquare(window='hann', n_frames=n_frames, hop_length=1024)
+
+    >>> import matplotlib.pyplot as plt
+    >>> fig, ax = plt.subplots(nrows=3, sharey=True)
+    >>> ax[0].plot(wss_256)
+    >>> ax[0].set(title='hop_length=256')
+    >>> ax[1].plot(wss_512)
+    >>> ax[1].set(title='hop_length=512')
+    >>> ax[2].plot(wss_1024)
+    >>> ax[2].set(title='hop_length=1024')
+    """
+    if win_length is None:
+        win_length = n_fft
+
+    n = n_fft + hop_length * (n_frames - 1)
+    x = np.zeros(n, dtype=dtype)
+
+    # Compute the squared window at the desired length
+    win_sq = get_window(window, win_length)
+    win_sq = util.normalize(win_sq, norm=norm) ** 2
+    win_sq = util.pad_center(win_sq, size=n_fft)
+
+    # Fill the envelope
+    __window_ss_fill(x, win_sq, n_frames, hop_length)
+
+    return x
+
+
+@cache(level=10)
+def diagonal_filter(
+    window: _WindowSpec,
+    n: int,
+    *,
+    slope: float = 1.0,
+    angle: Optional[float] = None,
+    zero_mean: bool = False,
+) -> np.ndarray:
+    """Build a two-dimensional diagonal filter.
+
+    This is primarily used for smoothing recurrence or self-similarity matrices.
+
+    Parameters
+    ----------
+    window : string, tuple, number, callable, or list-like
+        The window function to use for the filter.
+
+        See `get_window` for details.
+
+        Note that the window used here should be non-negative.
+
+    n : int > 0
+        the length of the filter
+
+    slope : float
+        The slope of the diagonal filter to produce
+
+    angle : float or None
+        If given, the slope parameter is ignored,
+        and angle directly sets the orientation of the filter (in radians).
+        Otherwise, angle is inferred as `arctan(slope)`.
+
+    zero_mean : bool
+        If True, a zero-mean filter is used.
+        Otherwise, a non-negative averaging filter is used.
+
+        This should be enabled if you want to enhance paths and suppress
+        blocks.
+
+    Returns
+    -------
+    kernel : np.ndarray, shape=[(m, m)]
+        The 2-dimensional filter kernel
+
+    Notes
+    -----
+    This function caches at level 10.
+    """
+    if angle is None:
+        angle = np.arctan(slope)
+
+    win = np.diag(get_window(window, n, fftbins=False))
+
+    if not np.isclose(angle, np.pi / 4):
+        win = scipy.ndimage.rotate(
+            win, 45 - angle * 180 / np.pi, order=5, prefilter=False
+        )
+
+    np.clip(win, 0, None, out=win)
+    win /= win.sum()
+
+    if zero_mean:
+        win -= win.mean()
+
+    return win
